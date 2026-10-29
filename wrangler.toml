@@ -1,0 +1,13 @@
+name = "vocab-battle"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vocab-battle-db"
+database_id = "720a749d-39e7-4e2d-a5f7-e49f1a08a713"

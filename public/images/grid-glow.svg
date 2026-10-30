@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+<defs><pattern id="p" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#7295ff" stroke-opacity=".24" stroke-width="1"/></pattern><radialGradient id="r"><stop stop-color="#528aff" stop-opacity=".3"/><stop offset="1" stop-color="#528aff" stop-opacity="0"/></radialGradient></defs>
+<rect width="640" height="480" fill="url(#p)"/><circle cx="120" cy="70" r="210" fill="url(#r)"/><circle cx="550" cy="280" r="180" fill="url(#r)"/>
+</svg>

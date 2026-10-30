@@ -1,5 +1,3 @@
-import HTML from "./index.html";
-
 const MAX_SCORE = 20 * 200; // 20문제 × 최대 200점
 const UNITS = 15;
 const SESSION_DAYS = 180;
@@ -189,6 +187,7 @@ export default {
         return err("서버 오류가 났어요. 잠시 후 다시 시도하세요", 500);
       }
     }
-    return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+    // 정적 파일(public/)에 없는 주소는 첫 화면으로
+    return Response.redirect(new URL("/", req.url).toString(), 302);
   },
 };

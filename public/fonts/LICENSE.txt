@@ -1,0 +1,7 @@
+public/fonts/ 의 글꼴은 Vocab Battle Design Kit(fonts/*.ttf)에서 웹용 woff2로 서브셋 변환한 것입니다.
+
+- Lato (lato-*.woff2): Copyright (c) 2010-2015 Łukasz Dziedzic. SIL Open Font License 1.1 — https://scripts.sil.org/OFL
+- NanumSquare (nanumsquare-*.woff2): Copyright NAVER Corporation. SIL Open Font License 1.1 — https://hangeul.naver.com/font
+  서브셋 범위: ASCII + KS X 1001 한글 2,350자 + 사이트에서 쓰는 기호
+
+OFL에 따라 글꼴 파일 자체를 단독으로 판매할 수 없으며, 웹사이트에 포함해 사용하는 것은 허용됩니다.

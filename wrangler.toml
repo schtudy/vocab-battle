@@ -2,10 +2,9 @@ name = "vocab-battle"
 main = "src/worker.js"
 compatibility_date = "2026-10-01"
 
-[[rules]]
-type = "Text"
-globs = ["**/*.html"]
-fallthrough = true
+# 정적 파일(HTML·CSS·JS·이미지·폰트)은 public/에서 바로 제공, 나머지(/api/*)는 Worker가 처리
+[assets]
+directory = "./public"
 
 [[d1_databases]]
 binding = "DB"

@@ -30,6 +30,8 @@ const say = (t) => { const l = $('live'); l.textContent = ''; setTimeout(() => {
 let token = LS.get('vb-token'), ME = null, tab = 'quiz';
 let unit = Math.min(UNITS, Math.max(1, +(LS.get('vb-unit') || 1) || 1)), dir = +(LS.get('vb-dir') || 0) ? 1 : 0;
 let rankU = 0, rankRows = null, comments = null, authMode = 'login', editing = false;
+let attToday = null, attRank = null, attMonth = null, attRankMode = 'streak', attFresh = false;
+const attDays = {}; // 'YYYY-MM' -> 출석한 날짜 배열
 let G = null, R = null; // 진행 중 게임, 마지막 결과
 const mini = {};        // Unit별 TOP 3 캐시
 
@@ -54,7 +56,7 @@ function header() {
   if (!ME) { el.innerHTML = '<span class="vb-chip">게스트</span>'; return; }
   el.innerHTML = `<button class="me-btn" id="mb" type="button" aria-haspopup="menu" aria-expanded="false">${avatar(ME.nick)}<span class="nm">${esc(ME.nick)}</span></button>
   <div class="menu vb-panel" id="mm" role="menu" hidden>
-    <div class="menu-h"><b>${esc(ME.nick)}</b><small>플레이 ${fmt(ME.plays)}회 · 합산 ${fmt(sumBest(ME.best))}점</small></div>
+    <div class="menu-h"><b>${esc(ME.nick)}</b><small>플레이 ${fmt(ME.plays)}회 · 합산 ${fmt(sumBest(ME.best))}점${ME.attend && ME.attend.streak ? ' · ' + ME.attend.streak + '일 연속 출석' : ''}</small></div>
     <button type="button" role="menuitem" id="cn">닉네임 변경</button>
     <button type="button" role="menuitem" id="lo">로그아웃</button>
   </div>`;
@@ -84,6 +86,7 @@ function render(anim) {
   if (editing && ME) nickForm();
   else if (tab === 'quiz') { if (R) result(); else if (ME) lobby(); else authForm(); }
   else if (tab === 'rank') rank();
+  else if (tab === 'att') att();
   else talk();
   if (anim) { UI.enter(M); window.scrollTo(0, 0); }
 }
@@ -170,7 +173,7 @@ function lobby() {
   }).join('');
   const dirSeg = (id) => `<div class="seg" id="${id}" role="group" aria-label="문제 방향"><button type="button" data-v="0" class="${dir ? '' : 'on'}" aria-pressed="${!dir}">영 → 뜻</button><button type="button" data-v="1" class="${dir ? 'on' : ''}" aria-pressed="${!!dir}">뜻 → 영</button></div>`;
   M.innerHTML = `<section class="lobby">
-    <div class="hello"><div><span class="eyebrow">READY PLAYER</span><h1>${esc(ME.nick)}님, 한 판 할까요?</h1></div></div>
+    <div class="hello"><div><span class="eyebrow">READY PLAYER</span><h1>${esc(ME.nick)}님, 한 판 할까요?</h1></div>${attBadge()}</div>
     <div class="stats">
       <div class="stat"><small>합산 점수</small><b>${fmt(sumBest(b))}</b></div>
       <div class="stat"><small>기록한 Unit</small><b>${cleared}<i>/ ${UNITS}</i></b></div>
@@ -207,6 +210,7 @@ function lobby() {
   M.querySelectorAll('#dir button').forEach((x) => (x.onclick = () => { dir = +x.dataset.v; LS.set('vb-dir', dir); lobby(); }));
   $('go').onclick = $('go2').onclick = () => start(unit);
   $('rv').onclick = () => start(0);
+  const ab = $('ab'); if (ab) ab.onclick = () => { tab = 'att'; render(true); pull(); };
   $('mr').onclick = () => { tab = 'rank'; rankU = unit; rankRows = null; render(true); pull(); };
   loadMini(unit);
 }
@@ -481,6 +485,118 @@ function talk() {
   }));
 }
 
+/* ---------- 출석부 ---------- */
+const WD = ['일', '월', '화', '수', '목', '금', '토'];
+const hm = (t) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Seoul' });
+const dayLabel = (d) => { const x = new Date(d + 'T00:00:00Z'); return `${x.getUTCMonth() + 1}월 ${x.getUTCDate()}일 ${WD[x.getUTCDay()]}요일`; };
+const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const shiftMonth = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const stampSVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 10 17 19 7.5"/></svg>';
+
+function attBadge() {
+  const a = ME && ME.attend; if (!a) return '';
+  return a.checked
+    ? `<button type="button" class="att-badge done" id="ab"><span class="dot"></span>${a.streak}일 연속 출석 중</button>`
+    : `<button type="button" class="att-badge" id="ab"><span class="dot"></span>오늘 출석 체크 안 했어요 · 출석하기</button>`;
+}
+
+async function loadAtt(all) {
+  const today = (attToday && attToday.day) || kstToday();
+  if (!attMonth) attMonth = today.slice(0, 7);
+  const jobs = [call('/api/attend/today'), call('/api/attend/rank')];
+  if (ME && (all || !attDays[attMonth])) jobs.push(call('/api/attend?month=' + attMonth));
+  const [t, r, mine] = await Promise.all(jobs);
+  let changed = JSON.stringify(t) !== JSON.stringify(attToday) || JSON.stringify(r) !== JSON.stringify(attRank);
+  attToday = t; attRank = r;
+  if (mine) {
+    changed = changed || JSON.stringify(mine.days) !== JSON.stringify(attDays[mine.month]);
+    attDays[mine.month] = mine.days;
+    if (ME) ME.attend = { today: mine.today, checked: mine.checked, streak: mine.streak, total: mine.total };
+  }
+  return changed;
+}
+
+function calendar() {
+  const ym = attMonth, today = (attToday && attToday.day) || kstToday();
+  const [y, m] = ym.split('-').map(Number);
+  const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(), n = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const days = new Set(attDays[ym] || []);
+  let cells = '';
+  for (let i = 0; i < first; i++) cells += '<span class="cd pad"></span>';
+  for (let d = 1; d <= n; d++) {
+    const key = `${ym}-${pad(d)}`, on = days.has(key), isT = key === today, fut = key > today;
+    cells += `<span class="cd${on ? ' on' : ''}${isT ? ' today' : ''}${fut ? ' fut' : ''}" aria-label="${m}월 ${d}일${on ? ' 출석' : ''}"><i>${d}</i>${on ? stampSVG : ''}</span>`;
+  }
+  const canNext = ym < today.slice(0, 7);
+  return `<div class="ph cal-h"><button type="button" class="cal-nav" id="cp" aria-label="이전 달">‹</button><h3>${y}년 ${m}월</h3><button type="button" class="cal-nav" id="cx" aria-label="다음 달" ${canNext ? '' : 'disabled'}>›</button></div>
+    <div class="cal" role="grid">${WD.map((w, i) => `<span class="wd${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${w}</span>`).join('')}${cells}</div>
+    <p class="note cal-sum">${ME ? `이번 달 ${(attDays[ym] || []).length}일 출석` : '로그인하면 내 출석 달력이 보여요'}</p>`;
+}
+
+function att() {
+  const draft = $('am2') ? $('am2').value : '';
+  const rows = attToday ? attToday.rows : null, day = (attToday && attToday.day) || kstToday();
+  const a = ME && ME.attend, myOrder = ME && rows ? rows.findIndex((x) => x.nick === ME.nick) + 1 : 0;
+  const rk = attRank ? (attRankMode === 'streak' ? attRank.streak.map((x) => ({ nick: x.nick, v: x.streak })) : attRank.monthly.map((x) => ({ nick: x.nick, v: x.n }))) : null;
+  if (!attMonth) attMonth = day.slice(0, 7);
+  M.innerHTML = `<section class="att">
+    <div class="rank-head"><div><span class="eyebrow">ATTENDANCE</span><h1>출석부</h1></div><small><i class="live-dot"></i>오늘 ${rows ? rows.length : '–'}명 출석</small></div>
+    <div class="att-grid"><div class="att-col">
+      <div class="stampp vb-panel vb-glow" id="sp">
+        <div class="ph"><div><span class="eyebrow">TODAY</span><h2>${dayLabel(day)}</h2></div></div>
+        ${!ME ? `<div class="stamp-zone"><div class="seal empty"><span>출석</span></div><p class="note">로그인하면 매일 출석 도장을 찍을 수 있어요.</p><button type="button" class="vb-primary" id="ag">로그인 / 가입</button></div>`
+        : a && a.checked ? `<div class="stamp-zone"><div class="seal${attFresh ? ' fresh' : ''}" id="seal"><img src="/images/logo-mark.svg" alt="" width="44" height="44"><b>출석</b><small>${day.slice(5).replace('-', '.')}</small></div>
+            <p class="stamp-msg"><b>출석 완료!</b> ${myOrder ? `오늘 ${myOrder}번째로 왔어요` : ''}</p></div>`
+        : `<form class="stamp-zone" id="af2" novalidate><div class="seal empty"><span>?</span></div>
+            <div class="field"><label for="am2">오늘의 한마디 <small>(선택 · 50자)</small></label><input class="input" id="am2" maxlength="50" placeholder="예: 오늘은 Unit 5 정복한다"></div>
+            <p class="err" id="ae2" role="alert"></p>
+            <button class="vb-primary stamp-btn" id="as2" type="submit">출석 도장 찍기</button></form>`}
+        ${ME && a ? `<div class="att-stats">
+          <div class="stat"><small>연속 출석</small><b>${a.streak}<i>일</i></b></div>
+          <div class="stat"><small>누적 출석</small><b>${a.total}<i>일</i></b></div>
+          <div class="stat"><small>이번 달</small><b>${(attDays[day.slice(0, 7)] || []).length}<i>일</i></b></div></div>` : ''}
+      </div>
+      <div class="calp vb-panel">${calendar()}</div>
+      </div><div class="att-col">
+      <div class="todayp vb-panel">
+        <div class="ph"><h3>오늘의 출석부</h3><small>${rows ? rows.length + '명' : ''}</small></div>
+        ${rows == null ? '<p class="empty">불러오는 중…</p>' : !rows.length ? '<p class="empty"><b>아직 아무도 없어요</b>오늘 1등으로 출석해보세요</p>'
+          : `<ol class="alist">${rows.map((x, i) => `<li class="${ME && x.nick === ME.nick ? 'mine' : ''}"><span class="rk${i < 3 ? ' vb-rank-' + (i + 1) : ''}">${i + 1}</span>${avatar(x.nick)}<div class="ab"><div class="h"><b>${esc(x.nick)}</b>${x.streak > 1 ? `<span class="vb-chip st">${x.streak}일 연속</span>` : ''}<span class="tm">${hm(x.at)}</span></div>${x.msg ? `<p>${esc(x.msg)}</p>` : ''}</div></li>`).join('')}</ol>`}
+      </div>
+      <div class="arank vb-panel">
+        <div class="ph"><h3>출석 랭킹</h3><div class="seg sm" id="arm"><button type="button" data-v="streak" class="${attRankMode === 'streak' ? 'on' : ''}">연속 출석</button><button type="button" data-v="monthly" class="${attRankMode === 'monthly' ? 'on' : ''}">이번 달</button></div></div>
+        ${rk == null ? '<p class="empty">불러오는 중…</p>' : !rk.length ? '<p class="empty">아직 기록이 없어요</p>'
+          : `<ol class="mini">${rk.slice(0, 10).map((x, i) => { const mi = ME && x.nick === ME.nick; return `<li class="${mi ? 'mine' : ''}"><span class="rk${i < 3 ? ' vb-rank-' + (i + 1) : ''}">${i + 1}</span><b>${esc(x.nick)}${mi ? '<span class="you">나</span>' : ''}</b><span>${x.v}일</span></li>`; }).join('')}</ol>`}
+      </div>
+    </div></div>
+  </section>`;
+  attFresh = false;
+  const f = $('af2');
+  if (f) {
+    $('am2').value = draft;
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('as2'); btn.disabled = true; $('ae2').textContent = '';
+      try {
+        const d = await call('/api/attend', { method: 'POST', body: { msg: $('am2').value } });
+        ME.attend = { today: d.today, checked: true, streak: d.streak, total: d.total };
+        const ym = d.today.slice(0, 7); attDays[ym] = [...new Set([...(attDays[ym] || []), d.today])].sort();
+        await loadAtt().catch(() => {});
+        attFresh = true; att(); header();
+        const sp = $('sp'); UI.flashNode(sp, 'combo-burst', '', 800); UI.buzz(40);
+        say(`출석 완료. 오늘 ${d.order}번째, ${d.streak}일 연속 출석`);
+      } catch (x) {
+        $('ae2').textContent = x.message; btn.disabled = false;
+        if (/이미/.test(x.message)) { await loadAtt(true).catch(() => {}); att(); }
+      }
+    };
+  }
+  const ag = $('ag'); if (ag) ag.onclick = () => { tab = 'quiz'; render(true); };
+  $('cp').onclick = () => { attMonth = shiftMonth(attMonth, -1); att(); if (ME && !attDays[attMonth]) loadAtt().then(() => tab === 'att' && !G && att()).catch(() => {}); };
+  $('cx').onclick = () => { attMonth = shiftMonth(attMonth, 1); att(); if (ME && !attDays[attMonth]) loadAtt().then(() => tab === 'att' && !G && att()).catch(() => {}); };
+  M.querySelectorAll('#arm button').forEach((b) => (b.onclick = () => { attRankMode = b.dataset.v; att(); }));
+}
+
 /* ---------- 실시간 갱신 ---------- */
 async function pull(force) {
   if (G || (document.hidden && !force)) return;
@@ -488,6 +604,10 @@ async function pull(force) {
     if (tab === 'rank') {
       const d = await call('/api/rank?unit=' + rankU);
       if (JSON.stringify(d.rows) !== JSON.stringify(rankRows)) { rankRows = d.rows; if (tab === 'rank' && !G) rank(); }
+    }
+    if (tab === 'att') {
+      const a = document.activeElement;
+      if ((await loadAtt(force)) && tab === 'att' && !G && !(a && a.id === 'am2')) att();
     }
     if (tab === 'talk') {
       const d = await call('/api/comments');

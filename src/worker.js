@@ -58,12 +58,25 @@ async function newSession(env, uid) {
   return token;
 }
 
+// ---------- 출석 (한국 시간 기준 하루) ----------
+const KST = 9 * 3600e3;
+const dayOf = (t = Date.now()) => new Date(t + KST).toISOString().slice(0, 10);
+const prevDay = (d) => new Date(Date.parse(d + "T00:00:00Z") - 864e5).toISOString().slice(0, 10);
+
+async function attendInfo(env, uid) {
+  const today = dayOf(), yday = prevDay(today);
+  const last = await env.DB.prepare("SELECT day, streak FROM attendance WHERE uid = ? ORDER BY day DESC LIMIT 1").bind(uid).first();
+  const total = await env.DB.prepare("SELECT COUNT(*) AS n FROM attendance WHERE uid = ?").bind(uid).first();
+  const streak = last && (last.day === today || last.day === yday) ? last.streak : 0;
+  return { today, checked: !!last && last.day === today, streak, total: total ? total.n : 0 };
+}
+
 async function me(env, u) {
   const best = await env.DB.prepare("SELECT unit, score FROM best WHERE uid = ?").bind(u.id).all();
   const wrong = await env.DB.prepare("SELECT word, cnt FROM wrong WHERE uid = ? ORDER BY cnt DESC").bind(u.id).all();
   const b = {};
   for (const r of best.results) b[r.unit] = r.score;
-  return { id: u.id, nick: u.nick, plays: u.plays, best: b, wrong: wrong.results };
+  return { id: u.id, nick: u.nick, plays: u.plays, best: b, wrong: wrong.results, attend: await attendInfo(env, u.id) };
 }
 
 async function api(req, env, path) {
@@ -110,11 +123,51 @@ async function api(req, env, path) {
     return json({ rows: r.results });
   }
 
+  if (path === "/api/attend/today" && m === "GET") {
+    const day = dayOf();
+    const r = await env.DB.prepare(
+      "SELECT u.nick, a.at, a.streak, a.msg FROM attendance a JOIN users u ON u.id = a.uid WHERE a.day = ? ORDER BY a.at ASC LIMIT 200"
+    ).bind(day).all();
+    return json({ day, rows: r.results });
+  }
+
+  if (path === "/api/attend/rank" && m === "GET") {
+    const today = dayOf(), yday = prevDay(today), month = today.slice(0, 7);
+    const streak = await env.DB.prepare(
+      "SELECT u.nick, a.streak FROM attendance a JOIN users u ON u.id = a.uid WHERE a.day >= ? AND a.day = (SELECT MAX(x.day) FROM attendance x WHERE x.uid = a.uid) ORDER BY a.streak DESC, a.at ASC LIMIT 20"
+    ).bind(yday).all();
+    const monthly = await env.DB.prepare(
+      "SELECT u.nick, COUNT(*) AS n FROM attendance a JOIN users u ON u.id = a.uid WHERE a.day LIKE ? GROUP BY a.uid ORDER BY n DESC, MIN(a.at) ASC LIMIT 20"
+    ).bind(month + "%").all();
+    return json({ month, streak: streak.results, monthly: monthly.results });
+  }
+
   // 이하 로그인 필요
   const u = await auth(req, env);
   if (!u) return err("로그인이 필요해요", 401);
 
   if (path === "/api/me" && m === "GET") return json(await me(env, u));
+
+  if (path === "/api/attend" && m === "GET") {
+    const qm = new URL(req.url).searchParams.get("month") || dayOf().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(qm)) return err("잘못된 달이에요");
+    const r = await env.DB.prepare("SELECT day FROM attendance WHERE uid = ? AND day LIKE ? ORDER BY day").bind(u.id, qm + "%").all();
+    return json({ month: qm, days: r.results.map((x) => x.day), ...(await attendInfo(env, u.id)) });
+  }
+
+  if (path === "/api/attend" && m === "POST") {
+    const msg = String((await body(req)).msg || "").trim().replace(/\s+/g, " ").slice(0, 50);
+    const today = dayOf();
+    const info = await attendInfo(env, u.id);
+    if (info.checked) return err("오늘은 이미 출석했어요. 내일 또 만나요", 409);
+    const streak = info.streak + 1; // 어제 출석했으면 이어지고, 아니면 0+1
+    const r = await env.DB.prepare("INSERT OR IGNORE INTO attendance(uid, day, at, streak, msg) VALUES (?, ?, ?, ?, ?)")
+      .bind(u.id, today, Date.now(), streak, msg)
+      .run();
+    if (!r.meta.changes) return err("오늘은 이미 출석했어요. 내일 또 만나요", 409);
+    const order = await env.DB.prepare("SELECT COUNT(*) AS n FROM attendance WHERE day = ?").bind(today).first();
+    return json({ order: order.n, ...(await attendInfo(env, u.id)) });
+  }
 
   if (path === "/api/logout" && m === "POST") {
     const token = req.headers.get("authorization").slice(7);

@@ -146,7 +146,6 @@ textarea.input { min-height: 96px; padding: 12px 16px; resize: vertical; line-he
   .lobby-grid { grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto 1fr; align-items: start; }
   .units-p { grid-row: 1 / span 2; order: 0; }
   .startp, .minirank { order: 0; }
-  .startp { position: sticky; top: 88px; }
   .startp .go { display: inline-flex; }
   .cta-m { display: none; }
 }
@@ -516,3 +515,27 @@ textarea.input { min-height: 96px; padding: 12px 16px; resize: vertical; line-he
   .fc-nav button { min-height: 50px; }
   .act { min-height: 46px; font-size: .84rem; }
 }
+
+/* ---------- 펼쳐 보는 단어 목록 ---------- */
+.wl-tog { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 50px; padding: 0 16px; border: 1px dashed var(--vb-line-2); border-radius: var(--vb-radius-s); background: rgba(255,255,255,.03); color: var(--vb-text); font-weight: 800; text-align: left; }
+.wl-tog[aria-expanded="true"] { border-style: solid; border-color: rgba(56,217,255,.45); background: rgba(56,217,255,.07); }
+.wl-tog i { font-style: normal; color: var(--vb-cyan); font-size: 1rem; }
+@media (hover: hover) { .wl-tog:hover { border-color: var(--vb-cyan); } }
+.wl-p { display: flex; flex-direction: column; gap: 10px; }
+.wl-tools { display: flex; align-items: center; gap: 10px; }
+.wl-tools .input { min-height: 44px; }
+.wl-tools small { flex-shrink: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.wg { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 460px; overflow-y: auto; padding: 2px; overscroll-behavior: contain; }
+@media (max-width: 400px) { .wg { grid-template-columns: 1fr 1fr; } }
+.wc { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 10px 9px; border: 1px solid var(--vb-line); border-radius: 12px; background: rgba(255,255,255,.035); text-align: left; transition: border-color .15s, background-color .15s; }
+.wc .no { font-size: .66rem; font-weight: 800; color: var(--vb-dim); font-variant-numeric: tabular-nums; }
+.wc b { font-weight: 800; font-size: .96rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc small { font-size: .78rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc .sm { position: absolute; top: 6px; font-style: normal; font-size: .74rem; font-weight: 900; }
+.wc .sm.st { right: 24px; color: var(--vb-gold); }
+.wc .sm.ok { right: 8px; color: var(--vb-success); }
+.wc .sm.st:last-child { right: 8px; }
+.wc.kn b { color: var(--vb-muted); }
+.wc.cur { border-color: var(--vb-cyan); background: rgba(56,217,255,.12); box-shadow: 0 0 0 2px rgba(56,217,255,.15); }
+@media (hover: hover) { .wc:hover { border-color: var(--vb-line-2); background: rgba(255,255,255,.06); } }
+.units-p .wl-tog { margin-top: 2px; }

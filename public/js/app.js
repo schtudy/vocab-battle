@@ -185,6 +185,8 @@ function lobby() {
       <div class="units-p vb-panel">
         <div class="ph"><h2>Unit 선택</h2><small>Unit당 200단어 · 뒤로 갈수록 어려워요</small></div>
         <div class="units" id="units">${tiles}</div>
+        <button type="button" class="wl-tog" id="wlt" aria-expanded="${WL.lobby}" aria-controls="wlp"><span>Unit ${pad(unit)} 단어 200개 ${WL.lobby ? '접기' : '펼쳐 보기'}</span><i aria-hidden="true">${WL.lobby ? '▴' : '▾'}</i></button>
+        <div class="wl-p" id="wlp" ${WL.lobby ? '' : 'hidden'}>${WL.lobby ? wordGrid(deckSource('u' + unit), -1) : ''}</div>
       </div>
       <div class="startp vb-panel vb-glow">
         <div class="sel-row">
@@ -208,11 +210,13 @@ function lobby() {
       </div>
     </div>
   </section>`;
-  M.querySelectorAll('[data-u]').forEach((x) => (x.onclick = () => { unit = +x.dataset.u; LS.set('vb-unit', unit); lobby(); }));
+  M.querySelectorAll('[data-u]').forEach((x) => (x.onclick = () => { unit = +x.dataset.u; WL.q = ''; LS.set('vb-unit', unit); lobby(); }));
   M.querySelectorAll('#dir button').forEach((x) => (x.onclick = () => { dir = +x.dataset.v; LS.set('vb-dir', dir); lobby(); }));
   $('go').onclick = $('go2').onclick = () => start(unit);
   $('rv').onclick = () => start(0);
   $('sd').onclick = () => { setDeck('u' + unit); S.dir = dir; saveSP(); tab = 'study'; render(true); };
+  $('wlt').onclick = () => { WL.lobby = !WL.lobby; WL.q = ''; if (WL.lobby && !ST.loaded) loadStudy().then(() => tab === 'quiz' && !G && !R && ME && lobby()); lobby(); if (WL.lobby) $('wlt').scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); };
+  if (WL.lobby) { const ws = deckSource('u' + unit); bindGrid(ws, (w) => { S.dir = dir; openCard('u' + unit, w); }, () => lobby()); }
   const ab = $('ab'); if (ab) ab.onclick = () => { tab = 'att'; render(true); pull(); };
   $('mr').onclick = () => { tab = 'rank'; rankU = unit; rankRows = null; render(true); pull(); };
   loadMini(unit);
@@ -488,6 +492,32 @@ function talk() {
   }));
 }
 
+/* ---------- 펼쳐 보는 단어 목록 (로비·학습 공용) ---------- */
+const WL = { lobby: false, study: false, q: '' };
+function wordGrid(words, cur) {
+  const q = WL.q.trim().toLowerCase();
+  const list = words.map((w, i) => ({ x: BYW[w], i })).filter(({ x }) => !q || x.w.toLowerCase().includes(q) || x.m.includes(q));
+  return `<div class="wl-tools"><label class="sr" for="wq">단어 찾기</label><input class="input" id="wq" type="search" placeholder="영단어나 뜻으로 찾기" value="${esc(WL.q)}" autocomplete="off" spellcheck="false"><small id="wn">${list.length}개</small></div>
+    <div class="wg" id="wg">${list.length ? list.map(({ x, i }) => `<button type="button" class="wc${i === cur ? ' cur' : ''}${ST.known.has(x.w) ? ' kn' : ''}" data-wi="${i}" aria-label="${esc(x.w)} 카드 열기${ST.known.has(x.w) ? ', 외운 단어' : ''}${ST.star.has(x.w) ? ', 별표' : ''}">
+      <span class="no">${pad(i + 1)}</span><b lang="en">${esc(x.w)}</b><small>${esc(x.m)}</small>${ST.star.has(x.w) ? '<i class="sm st" aria-hidden="true">★</i>' : ''}${ST.known.has(x.w) ? '<i class="sm ok" aria-hidden="true">✓</i>' : ''}</button>`).join('')
+      : '<p class="note">찾는 단어가 없어요</p>'}</div>`;
+}
+function bindGrid(words, onPick, rerender) {
+  const q = $('wq');
+  if (q) q.oninput = () => { WL.q = q.value; const pos = q.selectionStart; rerender(); const n = $('wq'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) { /* 무시 */ } } };
+  M.querySelectorAll('[data-wi]').forEach((b) => (b.onclick = () => onPick(words[+b.dataset.wi])));
+}
+// 특정 단어 카드 열기
+function openCard(deckKey, word) {
+  if (S.deck !== deckKey) setDeck(deckKey);
+  if (S.hideKnown && ST.known.has(word)) { S.hideKnown = false; saveSP(); }
+  S.mode = 'card'; saveSP();
+  const d = visibleDeck(); S.i = Math.max(0, d.indexOf(word)); S.flip = false; savePos();
+  WL.study = false; WL.q = '';
+  tab = 'study'; render(); window.scrollTo(0, 0);
+  const fc = $('fc'); if (fc) { UI.restart(fc, 'in-r'); fc.focus({ preventScroll: true }); }
+}
+
 /* ---------- 카드 학습 (시간 제한 없음) ---------- */
 const SP = (() => { try { return JSON.parse(LS.get('vb-study-pref') || '{}'); } catch (e) { return {}; } })();
 const S = { deck: SP.deck || 'u1', dir: SP.dir ? 1 : 0, mode: SP.mode === 'list' ? 'list' : 'card', shuffle: !!SP.shuffle, hideKnown: !!SP.hideKnown, hideMean: false, base: null, baseKey: '', i: 0, flip: false };
@@ -580,6 +610,8 @@ function study() {
         ${canSpeak ? `<button type="button" class="act" id="sp2">${spkSVG}발음 듣기</button>` : ''}
         <button type="button" class="act kn${ST.known.has(w) ? ' on' : ''}" id="bk2" aria-pressed="${ST.known.has(w)}"><span>✓</span>${ST.known.has(w) ? '외움 취소' : '외웠어요'}</button>
       </div>
+      <button type="button" class="wl-tog" id="swt" aria-expanded="${WL.study}" aria-controls="swp"><span>${deckName(S.deck)} 단어 목록 ${WL.study ? '접기' : '펼쳐서 카드 고르기'} · ${deck.length}개</span><i aria-hidden="true">${WL.study ? '▴' : '▾'}</i></button>
+      <div class="wl-p" id="swp" ${WL.study ? '' : 'hidden'}>${WL.study ? wordGrid(deck, S.i) : ''}</div>
       <p class="kbd-hint"><kbd>Space</kbd> 뒤집기 · <kbd>←</kbd><kbd>→</kbd> 이동 · <kbd>K</kbd> 외웠어요 · <kbd>S</kbd> 별표 · <kbd>P</kbd> 발음</p>
     </div>`;
   }
@@ -599,7 +631,7 @@ function study() {
     ${body}
   </section>`;
   const dk = $('dk'); if (sl != null) dk.scrollLeft = sl; else dk.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
-  dk.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { setDeck(b.dataset.d); study(); }));
+  dk.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { setDeck(b.dataset.d); WL.q = ''; study(); }));
   M.querySelectorAll('#sdir button').forEach((b) => (b.onclick = () => { S.dir = +b.dataset.v; S.flip = false; saveSP(); study(); }));
   M.querySelectorAll('#smode button').forEach((b) => (b.onclick = () => { S.mode = b.dataset.v; saveSP(); study(); }));
   $('shf').onclick = () => { S.shuffle = !S.shuffle; S.base = null; S.i = S.shuffle ? 0 : Math.max(0, +SPOS[S.deck] || 0); S.flip = false; saveSP(); study(); };
@@ -628,6 +660,8 @@ function study() {
     $('bs').onclick = () => mark(w, 'star');
     $('bk2').onclick = () => mark(w, 'known');
     const sp2 = $('sp2'); if (sp2) sp2.onclick = () => speak(w);
+    $('swt').onclick = () => { WL.study = !WL.study; WL.q = ''; study(); if (WL.study) { const c = $('wg')?.querySelector('.cur'); c ? c.scrollIntoView({ block: 'nearest' }) : $('swt').scrollIntoView({ block: 'start' }); } };
+    if (WL.study) bindGrid(deck, (x) => openCard(S.deck, x), () => study());
   }
 }
 const spkSVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>';

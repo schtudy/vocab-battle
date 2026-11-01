@@ -52,7 +52,7 @@ button:disabled { cursor: default; }
 img, svg { max-width: 100%; }
 [hidden] { display: none !important; }
 
-.vb-shell { position: relative; isolation: isolate; min-height: 100vh; min-height: 100dvh; }
+.vb-shell { position: relative; isolation: isolate; min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
 .vb-shell::before {
   content: "";
   position: fixed; inset: 0;

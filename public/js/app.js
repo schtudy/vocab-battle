@@ -66,7 +66,7 @@ function header() {
   $('lo').onclick = async () => {
     if (G) quitGame();
     try { await call('/api/logout', { method: 'POST' }); } catch (e) { /* 무시 */ }
-    token = null; LS.set('vb-token', null); ME = null; R = null; tab = 'quiz'; render(true);
+    token = null; LS.set('vb-token', null); ME = null; R = null; ST.loaded = false; tab = 'quiz'; render(true);
   };
 }
 document.addEventListener('click', (e) => { const mm = $('mm'); if (mm && !mm.hidden && !e.target.closest('.me')) { mm.hidden = true; $('mb')?.setAttribute('aria-expanded', 'false'); } });
@@ -87,6 +87,7 @@ function render(anim) {
   else if (tab === 'quiz') { if (R) result(); else if (ME) lobby(); else authForm(); }
   else if (tab === 'rank') rank();
   else if (tab === 'att') att();
+  else if (tab === 'study') study();
   else talk();
   if (anim) { UI.enter(M); window.scrollTo(0, 0); }
 }
@@ -136,7 +137,7 @@ function authForm() {
     const btn = $('as'); btn.disabled = true; $('ae').textContent = '';
     try {
       const d = await call(su ? '/api/signup' : '/api/login', { method: 'POST', body: { nick: $('an').value, pw: $('ap').value } });
-      token = d.token; LS.set('vb-token', token); ME = await call('/api/me'); render(true);
+      token = d.token; LS.set('vb-token', token); ME = await call('/api/me'); ST.loaded = false; render(true);
     } catch (x) { $('ae').textContent = x.message; btn.disabled = false; }
   };
 }
@@ -193,6 +194,7 @@ function lobby() {
         ${dirSeg('dir')}
         <button type="button" class="vb-primary go" id="go">배틀 시작 · ${NQ}문제</button>
         <button type="button" class="vb-secondary" id="rv" ${wc ? '' : 'disabled'}>오답 복습 · ${wc ? wc + '단어' : '아직 없음'}</button>
+        <button type="button" class="vb-secondary" id="sd">카드로 공부하기 · 시간 제한 없음</button>
         <ul class="rules">
           <li>정답 100점 + 남은 시간 보너스 최대 100점</li>
           <li>3초가 지나면 오답 처리</li>
@@ -210,6 +212,7 @@ function lobby() {
   M.querySelectorAll('#dir button').forEach((x) => (x.onclick = () => { dir = +x.dataset.v; LS.set('vb-dir', dir); lobby(); }));
   $('go').onclick = $('go2').onclick = () => start(unit);
   $('rv').onclick = () => start(0);
+  $('sd').onclick = () => { setDeck('u' + unit); S.dir = dir; saveSP(); tab = 'study'; render(true); };
   const ab = $('ab'); if (ab) ab.onclick = () => { tab = 'att'; render(true); pull(); };
   $('mr').onclick = () => { tab = 'rank'; rankU = unit; rankRows = null; render(true); pull(); };
   loadMini(unit);
@@ -484,6 +487,167 @@ function talk() {
     try { await call('/api/comments/' + b.dataset.d, { method: 'DELETE' }); await pull(true); } catch (x) { /* 무시 */ }
   }));
 }
+
+/* ---------- 카드 학습 (시간 제한 없음) ---------- */
+const SP = (() => { try { return JSON.parse(LS.get('vb-study-pref') || '{}'); } catch (e) { return {}; } })();
+const S = { deck: SP.deck || 'u1', dir: SP.dir ? 1 : 0, mode: SP.mode === 'list' ? 'list' : 'card', shuffle: !!SP.shuffle, hideKnown: !!SP.hideKnown, hideMean: false, base: null, baseKey: '', i: 0, flip: false };
+const SPOS = (() => { try { return JSON.parse(LS.get('vb-study-pos') || '{}'); } catch (e) { return {}; } })();
+const ST = { known: new Set(), star: new Set(), remote: false, loaded: false };
+if (!S.shuffle) S.i = Math.max(0, +SPOS[S.deck] || 0);
+const saveSP = () => LS.set('vb-study-pref', JSON.stringify({ deck: S.deck, dir: S.dir, mode: S.mode, shuffle: S.shuffle, hideKnown: S.hideKnown }));
+const savePos = () => { if (!S.shuffle) { SPOS[S.deck] = S.i; LS.set('vb-study-pos', JSON.stringify(SPOS)); } };
+const saveLocalST = () => { if (!ST.remote) LS.set('vb-study-local', JSON.stringify({ known: [...ST.known], star: [...ST.star] })); };
+const canSpeak = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+function speak(w) {
+  if (!canSpeak) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(w); u.lang = 'en-US'; u.rate = 0.9; speechSynthesis.speak(u); } catch (e) { /* 무시 */ }
+}
+async function loadStudy() {
+  ST.known.clear(); ST.star.clear();
+  if (ME) {
+    try { const d = await call('/api/study'); d.known.forEach((w) => ST.known.add(w)); d.star.forEach((w) => ST.star.add(w)); ST.remote = true; ST.loaded = true; return; }
+    catch (e) { /* 아래 로컬로 */ }
+  }
+  ST.remote = false; ST.loaded = true;
+  try { const d = JSON.parse(LS.get('vb-study-local') || '{}'); (d.known || []).forEach((w) => ST.known.add(w)); (d.star || []).forEach((w) => ST.star.add(w)); } catch (e) { /* 무시 */ }
+}
+async function mark(word, field) {
+  const set = ST[field], on = !set.has(word);
+  on ? set.add(word) : set.delete(word);
+  saveLocalST();
+  if (ST.remote) {
+    try { await call('/api/study', { method: 'POST', body: { word, [field]: on } }); }
+    catch (x) { on ? set.delete(word) : set.add(word); if (tab === 'study') { const e = $('se'); if (e) e.textContent = '저장하지 못했어요 · ' + x.message; study(); } return; }
+  }
+  if (field === 'known' && on && S.mode === 'card' && !S.hideKnown) { S.flip = false; S.i++; savePos(); }
+  if (tab === 'study') study();
+}
+const deckName = (k) => (k === 'wrong' ? '오답노트' : k === 'star' ? '별표 단어' : 'Unit ' + pad(+k.slice(1)));
+function deckSource(k) {
+  if (k === 'wrong') return wrongWords().map((x) => x.word);
+  if (k === 'star') return W.filter((x) => ST.star.has(x.w)).map((x) => x.w);
+  const u = +k.slice(1); return W.filter((x) => x.u === u).map((x) => x.w);
+}
+function visibleDeck() {
+  const key = S.deck + '|' + S.shuffle;
+  const src = deckSource(S.deck);
+  if (S.baseKey !== key || !S.base) { S.base = S.shuffle ? sh(src) : src; S.baseKey = key; }
+  else { const have = new Set(S.base), now = new Set(src); S.base = S.base.filter((w) => now.has(w)).concat(src.filter((w) => !have.has(w))); }
+  return S.hideKnown ? S.base.filter((w) => !ST.known.has(w)) : S.base;
+}
+function setDeck(k) { S.deck = k; S.base = null; S.i = S.shuffle ? 0 : Math.max(0, +SPOS[k] || 0); S.flip = false; saveSP(); }
+
+function study() {
+  if (!ST.loaded) { M.innerHTML = '<div class="vb-panel empty">학습 기록 불러오는 중…</div>'; loadStudy().then(() => tab === 'study' && !G && study()); return; }
+  const sl = $('dk') ? $('dk').scrollLeft : null;
+  const deck = visibleDeck(), all = deckSource(S.deck), knownN = all.filter((w) => ST.known.has(w)).length;
+  if (S.i > deck.length) S.i = deck.length;
+  const wc = wrongWords().length;
+  const pills = Array.from({ length: UNITS }, (_, k) => `u${k + 1}`).map((k) => `<button type="button" class="pill${S.deck === k ? ' on' : ''}" data-d="${k}">${deckName(k)}</button>`).join('')
+    + `<button type="button" class="pill${S.deck === 'wrong' ? ' on' : ''}" data-d="wrong">오답노트 ${wc}</button><button type="button" class="pill${S.deck === 'star' ? ' on' : ''}" data-d="star">★ 별표 ${ST.star.size}</button>`;
+  const tg = (id, on, label) => `<button type="button" class="tgl${on ? ' on' : ''}" id="${id}" aria-pressed="${on}"><span class="sw" aria-hidden="true"></span>${label}</button>`;
+  let body;
+  if (!all.length) {
+    body = `<div class="vb-panel empty"><b>${S.deck === 'star' ? '별표한 단어가 없어요' : '오답노트가 비었어요'}</b>${S.deck === 'star' ? '카드에서 ★를 눌러 모아보세요' : '퀴즈에서 틀린 단어가 여기에 모여요'}</div>`;
+  } else if (S.mode === 'list') {
+    body = `<div class="vb-panel slist-p"><div class="ph"><h3>${deckName(S.deck)} · ${deck.length}단어</h3>${tg('hm', S.hideMean, S.dir ? '영단어 가리기' : '뜻 가리기')}</div>
+      <ul class="slist">${deck.map((w) => { const x = BYW[w]; const a = S.dir ? x.m : x.w, b = S.dir ? x.w : x.m; return `<li class="${ST.known.has(w) ? 'kn' : ''}">
+        <button type="button" class="ic st${ST.star.has(w) ? ' on' : ''}" data-s="${esc(w)}" aria-label="별표" aria-pressed="${ST.star.has(w)}">★</button>
+        <div class="wm"><b lang="${S.dir ? 'ko' : 'en'}">${esc(a)}</b><span class="mn${S.hideMean ? ' hid' : ''}" tabindex="${S.hideMean ? 0 : -1}" lang="${S.dir ? 'en' : 'ko'}">${esc(b)}</span></div>
+        ${canSpeak ? `<button type="button" class="ic" data-p="${esc(w)}" aria-label="발음 듣기">${spkSVG}</button>` : ''}
+        <button type="button" class="ic kn${ST.known.has(w) ? ' on' : ''}" data-k="${esc(w)}" aria-label="외웠어요" aria-pressed="${ST.known.has(w)}">✓</button></li>`; }).join('')}</ul></div>`;
+  } else if (S.i >= deck.length) {
+    body = `<div class="vb-panel done-p"><span class="eyebrow">DECK CLEAR</span><h2>${deckName(S.deck)} 한 바퀴 끝!</h2>
+      <p class="note">${all.length}단어 중 <b>${knownN}</b>개를 외웠어요${all.length - knownN ? ` · 남은 ${all.length - knownN}개` : ''}</p>
+      <div class="vb-progress"><span style="width:${(knownN / all.length * 100).toFixed(1)}%"></span></div>
+      <div class="res-actions"><button type="button" class="vb-primary" id="rs1">${all.length - knownN && !S.hideKnown ? '모르는 단어만 다시' : '처음부터 다시'}</button><button type="button" class="vb-secondary" id="rs2">처음부터 전체</button>${S.deck.startsWith('u') ? `<button type="button" class="vb-secondary" id="rs3">이 Unit 퀴즈 도전</button>` : ''}</div></div>`;
+  } else {
+    const w = deck[S.i], x = BYW[w], front = S.dir ? x.m : x.w, back = S.dir ? x.w : x.m;
+    body = `<div class="fc-wrap">
+      <div class="fc${S.flip ? ' flip' : ''}" id="fc" role="button" tabindex="0" aria-label="${S.flip ? '앞면 보기' : '뒤집어서 ' + (S.dir ? '영단어' : '뜻') + ' 보기'}">
+        <div class="fc-in">
+          <div class="fc-face front"><span class="vb-chip">Unit ${pad(x.u)}</span>${ST.known.has(w) ? '<span class="fc-tag">외움</span>' : ''}<b lang="${S.dir ? 'ko' : 'en'}" class="${[...front].length > 12 ? 'l' : ''}">${esc(front)}</b><small>탭해서 ${S.dir ? '영단어' : '뜻'} 보기</small></div>
+          <div class="fc-face back"><small lang="${S.dir ? 'ko' : 'en'}">${esc(front)}</small><b lang="${S.dir ? 'en' : 'ko'}" class="${[...back].length > 12 ? 'l' : ''}">${esc(back)}</b><small>다시 탭하면 앞면</small></div>
+        </div>
+      </div>
+      <div class="fc-nav">
+        <button type="button" class="vb-secondary" id="pv" ${S.i ? '' : 'disabled'} aria-label="이전 카드">‹ 이전</button>
+        <button type="button" class="vb-secondary" id="fl">뒤집기</button>
+        <button type="button" class="vb-primary" id="nx" aria-label="다음 카드">다음 ›</button>
+      </div>
+      <div class="fc-act">
+        <button type="button" class="act st${ST.star.has(w) ? ' on' : ''}" id="bs" aria-pressed="${ST.star.has(w)}"><span>★</span>${ST.star.has(w) ? '별표 해제' : '별표'}</button>
+        ${canSpeak ? `<button type="button" class="act" id="sp2">${spkSVG}발음 듣기</button>` : ''}
+        <button type="button" class="act kn${ST.known.has(w) ? ' on' : ''}" id="bk2" aria-pressed="${ST.known.has(w)}"><span>✓</span>${ST.known.has(w) ? '외움 취소' : '외웠어요'}</button>
+      </div>
+      <p class="kbd-hint"><kbd>Space</kbd> 뒤집기 · <kbd>←</kbd><kbd>→</kbd> 이동 · <kbd>K</kbd> 외웠어요 · <kbd>S</kbd> 별표 · <kbd>P</kbd> 발음</p>
+    </div>`;
+  }
+  const pos = S.mode === 'card' && deck.length ? Math.min(S.i + 1, deck.length) : deck.length;
+  M.innerHTML = `<section class="study">
+    <div class="rank-head"><div><span class="eyebrow">STUDY · 시간 제한 없음</span><h1>카드 학습</h1></div>
+      <small>${ME ? (ST.remote ? '외운 단어·별표가 계정에 저장돼요' : '오프라인 · 이 기기에만 저장 중') : '게스트 · 이 기기에만 저장돼요'}</small></div>
+    <div class="hscroll" id="dk" role="tablist" aria-label="학습할 단어 묶음">${pills}</div>
+    <div class="s-ctrl">
+      <div class="seg" id="sdir" role="group" aria-label="방향"><button type="button" data-v="0" class="${S.dir ? '' : 'on'}">영 → 뜻</button><button type="button" data-v="1" class="${S.dir ? 'on' : ''}">뜻 → 영</button></div>
+      <div class="seg" id="smode" role="group" aria-label="보기 방식"><button type="button" data-v="card" class="${S.mode === 'card' ? 'on' : ''}">카드</button><button type="button" data-v="list" class="${S.mode === 'list' ? 'on' : ''}">목록</button></div>
+      ${tg('shf', S.shuffle, '섞기')}${tg('hk', S.hideKnown, '외운 단어 빼기')}
+    </div>
+    ${all.length ? `<div class="s-prog"><div class="row"><b>${S.mode === 'card' ? `${pos} / ${deck.length}` : `${deck.length}단어`}</b><span>외운 단어 <b>${knownN}</b> / ${all.length}</span></div>
+      <div class="vb-progress"><span style="width:${(knownN / all.length * 100).toFixed(1)}%"></span></div></div>` : ''}
+    <p class="err" id="se" role="alert"></p>
+    ${body}
+  </section>`;
+  const dk = $('dk'); if (sl != null) dk.scrollLeft = sl; else dk.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  dk.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { setDeck(b.dataset.d); study(); }));
+  M.querySelectorAll('#sdir button').forEach((b) => (b.onclick = () => { S.dir = +b.dataset.v; S.flip = false; saveSP(); study(); }));
+  M.querySelectorAll('#smode button').forEach((b) => (b.onclick = () => { S.mode = b.dataset.v; saveSP(); study(); }));
+  $('shf').onclick = () => { S.shuffle = !S.shuffle; S.base = null; S.i = S.shuffle ? 0 : Math.max(0, +SPOS[S.deck] || 0); S.flip = false; saveSP(); study(); };
+  $('hk').onclick = () => { S.hideKnown = !S.hideKnown; S.i = 0; S.flip = false; saveSP(); study(); };
+  const hmb = $('hm'); if (hmb) hmb.onclick = () => { S.hideMean = !S.hideMean; study(); };
+  M.querySelectorAll('.slist .mn.hid').forEach((n) => { const r = () => n.classList.toggle('peek'); n.onclick = r; n.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r(); } }; });
+  M.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => mark(b.dataset.s, 'star')));
+  M.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => mark(b.dataset.k, 'known')));
+  M.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => speak(b.dataset.p)));
+  const r1 = $('rs1'); if (r1) r1.onclick = () => { if (all.length - knownN && !S.hideKnown) S.hideKnown = true; S.i = 0; S.flip = false; if (S.shuffle) S.base = null; saveSP(); savePos(); study(); };
+  const r2 = $('rs2'); if (r2) r2.onclick = () => { S.hideKnown = false; S.i = 0; S.flip = false; if (S.shuffle) S.base = null; saveSP(); savePos(); study(); };
+  const r3 = $('rs3'); if (r3) r3.onclick = () => { unit = +S.deck.slice(1); LS.set('vb-unit', unit); tab = 'quiz'; R = null; start(unit); };
+  const fc = $('fc');
+  if (fc) {
+    const w = deck[S.i];
+    const flip = () => { S.flip = !S.flip; fc.classList.toggle('flip', S.flip); fc.setAttribute('aria-label', S.flip ? '앞면 보기' : '뒤집기'); if (S.flip) say(fc.querySelector('.back b').textContent); };
+    let sx = null, sy = 0, moved = false;
+    fc.onpointerdown = (e) => { sx = e.clientX; sy = e.clientY; moved = false; };
+    fc.onpointermove = (e) => { if (sx == null) return; const dx = e.clientX - sx; if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(e.clientY - sy)) { moved = true; fc.style.transform = `translateX(${dx}px) rotate(${dx / 30}deg)`; } };
+    const end = (e) => { if (sx == null) return; const dx = e.clientX - sx; sx = null; fc.style.transform = ''; if (moved && Math.abs(dx) > 70) { go(dx < 0 ? 1 : -1); } else if (!moved) flip(); };
+    fc.onpointerup = end; fc.onpointercancel = () => { sx = null; fc.style.transform = ''; };
+    fc.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); flip(); } };
+    $('fl').onclick = flip;
+    $('pv').onclick = () => go(-1);
+    $('nx').onclick = () => go(1);
+    $('bs').onclick = () => mark(w, 'star');
+    $('bk2').onclick = () => mark(w, 'known');
+    const sp2 = $('sp2'); if (sp2) sp2.onclick = () => speak(w);
+  }
+}
+const spkSVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
+function go(d) {
+  const n = visibleDeck().length; const ni = Math.max(0, Math.min(n, S.i + d));
+  if (ni === S.i) return; S.i = ni; S.flip = false; savePos(); study();
+  const fc = $('fc'); if (fc) UI.restart(fc, d > 0 ? 'in-r' : 'in-l');
+}
+document.addEventListener('keydown', (e) => {
+  if (tab !== 'study' || G || S.mode !== 'card' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  const fc = $('fc'), w = fc ? visibleDeck()[S.i] : null;
+  if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+  else if (!fc) return;
+  else if (e.key === ' ' && t === document.body || e.key === ' ' && t === fc) { e.preventDefault(); $('fl').click(); }
+  else if (e.key === 'k' || e.key === 'K') mark(w, 'known');
+  else if (e.key === 's' || e.key === 'S') mark(w, 'star');
+  else if ((e.key === 'p' || e.key === 'P') && canSpeak) speak(w);
+});
 
 /* ---------- 출석부 ---------- */
 const WD = ['일', '월', '화', '수', '목', '금', '토'];

@@ -169,6 +169,26 @@ async function api(req, env, path) {
     return json({ order: order.n, ...(await attendInfo(env, u.id)) });
   }
 
+  if (path === "/api/study" && m === "GET") {
+    const r = await env.DB.prepare("SELECT word, known, star FROM study WHERE uid = ?").bind(u.id).all();
+    return json({ known: r.results.filter((x) => x.known).map((x) => x.word), star: r.results.filter((x) => x.star).map((x) => x.word) });
+  }
+
+  if (path === "/api/study" && m === "POST") {
+    const { word, known, star } = await body(req);
+    const w = String(word || "").trim().slice(0, 40);
+    if (!w) return err("단어가 없어요");
+    const cur = await env.DB.prepare("SELECT known, star FROM study WHERE uid = ? AND word = ?").bind(u.id, w).first();
+    const k = known === undefined ? (cur ? cur.known : 0) : known ? 1 : 0;
+    const st = star === undefined ? (cur ? cur.star : 0) : star ? 1 : 0;
+    if (!k && !st) await env.DB.prepare("DELETE FROM study WHERE uid = ? AND word = ?").bind(u.id, w).run();
+    else
+      await env.DB.prepare(
+        "INSERT INTO study(uid, word, known, star, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(uid, word) DO UPDATE SET known = excluded.known, star = excluded.star, at = excluded.at"
+      ).bind(u.id, w, k, st, Date.now()).run();
+    return json({ word: w, known: !!k, star: !!st });
+  }
+
   if (path === "/api/logout" && m === "POST") {
     const token = req.headers.get("authorization").slice(7);
     await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();

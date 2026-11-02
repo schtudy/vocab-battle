@@ -196,11 +196,12 @@ function lobby() {
         ${dirSeg('dir')}
         <button type="button" class="vb-primary go" id="go">배틀 시작 · ${NQ}문제</button>
         <button type="button" class="vb-secondary" id="rv" ${wc ? '' : 'disabled'}>오답 복습 · ${wc ? wc + '단어' : '아직 없음'}</button>
+        <button type="button" class="vb-secondary" id="sq" ${ST.star.size ? '' : 'disabled'}><span class="star-i" aria-hidden="true">★</span>별표 퀴즈 · ${!ST.loaded ? '불러오는 중' : ST.star.size ? ST.star.size + '단어' : '학습 탭에서 별표를 모아보세요'}</button>
         <button type="button" class="vb-secondary" id="sd">카드로 공부하기 · 시간 제한 없음</button>
         <ul class="rules">
           <li>정답 100점 + 남은 시간 보너스 최대 100점</li>
           <li>3초가 지나면 오답 처리</li>
-          <li>Unit별 최고점이 랭킹에 반영 · 오답 복습에서 맞히면 오답노트에서 빠져요</li>
+          <li>Unit별 최고점이 랭킹에 반영 · 오답 복습·별표 퀴즈는 연습용(랭킹 미반영)</li>
         </ul>
       </div>
       <div class="cta-m"><button type="button" class="vb-primary" id="go2">Unit ${pad(unit)} 배틀 시작</button></div>
@@ -214,6 +215,8 @@ function lobby() {
   M.querySelectorAll('#dir button').forEach((x) => (x.onclick = () => { dir = +x.dataset.v; LS.set('vb-dir', dir); lobby(); }));
   $('go').onclick = $('go2').onclick = () => start(unit);
   $('rv').onclick = () => start(0);
+  $('sq').onclick = () => start(-1);
+  if (!ST.loaded) loadStudy().then(() => { if (tab === 'quiz' && !G && !R && !editing && ME) lobby(); });
   $('sd').onclick = () => { setDeck('u' + unit); S.dir = dir; saveSP(); tab = 'study'; render(true); };
   $('wlt').onclick = () => { WL.lobby = !WL.lobby; WL.q = ''; if (WL.lobby && !ST.loaded) loadStudy().then(() => tab === 'quiz' && !G && !R && ME && lobby()); lobby(); if (WL.lobby) $('wlt').scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); };
   if (WL.lobby) { const ws = deckSource('u' + unit); bindGrid(ws, (w) => { S.dir = dir; openCard('u' + unit, w); }, () => lobby()); }
@@ -240,10 +243,11 @@ async function loadMini(u) {
 }
 
 /* ---------- 게임 ---------- */
+const modeLabel = (u) => (u > 0 ? 'Unit ' + pad(u) : u === 0 ? '오답 복습' : '별표 퀴즈');
 function start(u) {
   R = null;
-  const src = u ? W.filter((x) => x.u === u) : sh(wrongWords().map((x) => BYW[x.word]));
-  const qs = (u ? sh(src) : src).slice(0, NQ).map((a) => {
+  const src = u > 0 ? W.filter((x) => x.u === u) : u === 0 ? wrongWords().map((x) => BYW[x.word]) : W.filter((x) => ST.star.has(x.w));
+  const qs = sh(src).slice(0, NQ).map((a) => {
     const pool = W.filter((x) => x.u === a.u && x !== a);
     return { a, opts: sh([a, ...sh(pool).slice(0, 3)]) };
   });
@@ -252,7 +256,7 @@ function start(u) {
   setTabs();
   M.innerHTML = `<section class="game" id="game" aria-label="퀴즈">
     <div class="g-top">
-      <div class="left"><button type="button" class="quit" id="qt">그만두기</button><span class="vb-chip">${u ? 'Unit ' + pad(u) : '오답 복습'} · ${dir ? '뜻→영' : '영→뜻'}</span></div>
+      <div class="left"><button type="button" class="quit" id="qt">그만두기</button><span class="vb-chip">${modeLabel(u)} · ${dir ? '뜻→영' : '영→뜻'}</span></div>
       <div class="score"><small>SCORE</small><b id="sc">0</b></div>
     </div>
     <div class="pips" id="pips" style="--n:${G.n}" aria-hidden="true">${G.qs.map(() => '<i></i>').join('')}</div>
@@ -372,14 +376,14 @@ document.addEventListener('keydown', (e) => {
 const gradeOf = (score, n) => { const r = score / (n * 200); return r >= .85 ? 'S' : r >= .7 ? 'A' : r >= .5 ? 'B' : r >= .3 ? 'C' : 'D'; };
 async function finish() {
   const g = G; G = null; setTabs();
-  const prev = g.u ? ((ME.best || {})[g.u] || 0) : 0;
+  const prev = g.u > 0 ? ((ME.best || {})[g.u] || 0) : 0;
   const avg = g.times.length ? g.times.reduce((a, b) => a + b, 0) / g.times.length / 1000 : 0;
-  R = { u: g.u, dir: g.dir, n: g.n, score: g.score, ok: g.ok, maxCombo: g.maxCombo, res: g.res, avg, prev, rec: !!g.u && g.score > prev, wrong: g.wrong, save: { t: '저장 중…', c: '' }, fresh: true };
+  R = { u: g.u, dir: g.dir, n: g.n, score: g.score, ok: g.ok, maxCombo: g.maxCombo, res: g.res, avg, prev, rec: g.u > 0 && g.score > prev, wrong: g.wrong, save: { t: '저장 중…', c: '' }, fresh: true };
   render(true);
   try {
-    ME = await call('/api/score', { method: 'POST', body: { unit: g.u, score: g.score, wrong: g.wrong.map((x) => x.w), right: g.right } });
-    if (g.u) delete mini[g.u];
-    R.save = { t: !g.u ? `오답노트 갱신 완료 · 남은 오답 ${wrongWords().length}단어` : R.rec ? '랭킹에 반영됐어요' : `기록 저장 완료 · 최고점 ${fmt(prev)}점 유지`, c: 'ok' };
+    ME = await call('/api/score', { method: 'POST', body: { unit: Math.max(0, g.u), score: g.score, wrong: g.wrong.map((x) => x.w), right: g.right } });
+    if (g.u > 0) delete mini[g.u];
+    R.save = { t: g.u === -1 ? `별표 퀴즈 완료 · 랭킹에는 반영되지 않아요${g.wrong.length ? ' · 틀린 단어는 오답노트에 저장' : ''}` : !g.u ? `오답노트 갱신 완료 · 남은 오답 ${wrongWords().length}단어` : R.rec ? '랭킹에 반영됐어요' : `기록 저장 완료 · 최고점 ${fmt(prev)}점 유지`, c: 'ok' };
   } catch (x) { R.save = { t: x.message + ' · 기록이 저장되지 않았어요', c: 'bad' }; }
   header();
   const sv = $('sv'); if (sv && R) { sv.textContent = R.save.t; sv.className = 'save ' + R.save.c; }
@@ -390,7 +394,7 @@ function result() {
     <div class="res-hero vb-panel vb-glow">
       <div class="grade g-${gr}" aria-label="등급 ${gr}"><b>${gr}</b></div>
       <div class="res-main">
-        <span class="eyebrow">${r.u ? 'Unit ' + pad(r.u) : '오답 복습'} · ${r.dir ? '뜻→영' : '영→뜻'} · RESULT</span>
+        <span class="eyebrow">${modeLabel(r.u)} · ${r.dir ? '뜻→영' : '영→뜻'} · RESULT</span>
         <div class="res-score"><b id="rs">${r.fresh ? 0 : fmt(r.score)}</b><span>점</span></div>
         ${r.rec ? `<span class="record"><img src="/images/medal.svg" alt="" width="24" height="28">${r.prev ? '신기록! 이전 최고 ' + fmt(r.prev) + '점' : '첫 기록 달성!'}</span>` : ''}
         <span class="save ${r.save.c}" id="sv" role="status">${esc(r.save.t)}</span>
@@ -400,12 +404,12 @@ function result() {
       <div class="stat"><small>정답</small><b>${r.ok}<i>/ ${r.n} · ${acc}%</i></b></div>
       <div class="stat"><small>최대 콤보</small><b>${r.maxCombo}<i>연속</i></b></div>
       <div class="stat"><small>평균 응답</small><b>${r.avg ? r.avg.toFixed(2) : '—'}<i>${r.avg ? '초' : ''}</i></b></div>
-      <div class="stat"><small>${r.u ? '이 Unit 최고점' : '남은 오답'}</small><b>${r.u ? fmt(Math.max(r.prev, r.score)) : wrongWords().length}<i>${r.u ? '점' : '단어'}</i></b></div>
+      <div class="stat"><small>${r.u > 0 ? '이 Unit 최고점' : r.u === 0 ? '남은 오답' : '별표 단어'}</small><b>${r.u > 0 ? fmt(Math.max(r.prev, r.score)) : r.u === 0 ? wrongWords().length : ST.star.size}<i>${r.u > 0 ? '점' : '단어'}</i></b></div>
     </div>
     <div class="pips" style="--n:${r.n}" aria-label="문항별 결과: 정답 ${r.ok}개">${r.res.map((x) => `<i class="${x}"></i>`).join('')}</div>
     <div class="res-actions">
       <button type="button" class="vb-primary" id="re">다시 하기</button>
-      ${r.u ? '<button type="button" class="vb-secondary" id="lb">랭킹 보기</button>' : ''}
+      ${r.u > 0 ? '<button type="button" class="vb-secondary" id="lb">랭킹 보기</button>' : ''}${r.u === -1 ? '<button type="button" class="vb-secondary" id="sv2">별표 카드 보기</button>' : ''}
       <button type="button" class="vb-secondary" id="bk">Unit 고르기</button>
     </div>
     ${r.wrong.length ? `<div class="wrongs vb-panel"><div class="ph"><h3>틀린 단어 ${r.wrong.length}개</h3><small>오답노트에 저장돼요</small></div>
@@ -414,7 +418,8 @@ function result() {
   </section>`;
   if (r.fresh) { r.fresh = false; UI.countUp($('rs'), 0, r.score, 900); }
   $('re').onclick = () => start(r.u);
-  if (r.u) $('lb').onclick = () => { R = null; tab = 'rank'; rankU = r.u; rankRows = null; render(true); pull(); };
+  const sv2 = $('sv2'); if (sv2) sv2.onclick = () => { R = null; setDeck('star'); tab = 'study'; render(true); };
+  if (r.u > 0) $('lb').onclick = () => { R = null; tab = 'rank'; rankU = r.u; rankRows = null; render(true); pull(); };
   $('bk').onclick = () => { R = null; render(true); };
   $('re').focus({ preventScroll: true });
 }
@@ -627,6 +632,7 @@ function study() {
     </div>
     ${all.length ? `<div class="s-prog"><div class="row"><b>${S.mode === 'card' ? `${pos} / ${deck.length}` : `${deck.length}단어`}</b><span>외운 단어 <b>${knownN}</b> / ${all.length}</span></div>
       <div class="vb-progress"><span style="width:${(knownN / all.length * 100).toFixed(1)}%"></span></div></div>` : ''}
+    ${(S.deck === 'star' || S.deck === 'wrong') && all.length ? `<button type="button" class="vb-secondary deck-quiz" id="dq">${S.deck === 'star' ? '<span class="star-i" aria-hidden="true">★</span> 별표 단어' : '오답노트'} ${all.length}개로 퀴즈 풀기${all.length > NQ ? ` (랜덤 ${NQ}문제)` : ''}</button>` : ''}
     <p class="err" id="se" role="alert"></p>
     ${body}
   </section>`;
@@ -643,6 +649,7 @@ function study() {
   M.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => speak(b.dataset.p)));
   const r1 = $('rs1'); if (r1) r1.onclick = () => { if (all.length - knownN && !S.hideKnown) S.hideKnown = true; S.i = 0; S.flip = false; if (S.shuffle) S.base = null; saveSP(); savePos(); study(); };
   const r2 = $('rs2'); if (r2) r2.onclick = () => { S.hideKnown = false; S.i = 0; S.flip = false; if (S.shuffle) S.base = null; saveSP(); savePos(); study(); };
+  const dq = $('dq'); if (dq) dq.onclick = () => { if (!ME) { tab = 'quiz'; render(true); return; } dir = S.dir; LS.set('vb-dir', dir); tab = 'quiz'; R = null; start(S.deck === 'star' ? -1 : 0); };
   const r3 = $('rs3'); if (r3) r3.onclick = () => { unit = +S.deck.slice(1); LS.set('vb-unit', unit); tab = 'quiz'; R = null; start(unit); };
   const fc = $('fc');
   if (fc) {

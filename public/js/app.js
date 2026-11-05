@@ -66,7 +66,7 @@ function header() {
   $('lo').onclick = async () => {
     if (G) quitGame();
     try { await call('/api/logout', { method: 'POST' }); } catch (e) { /* 무시 */ }
-    token = null; LS.set('vb-token', null); ME = null; R = null; ST.loaded = false; tab = 'quiz'; render(true);
+    token = null; LS.set('vb-token', null); ME = null; R = null; ST.loaded = false; PL.loaded = false; tab = 'quiz'; render(true);
   };
 }
 document.addEventListener('click', (e) => { const mm = $('mm'); if (mm && !mm.hidden && !e.target.closest('.me')) { mm.hidden = true; $('mb')?.setAttribute('aria-expanded', 'false'); } });
@@ -87,7 +87,7 @@ function render(anim) {
   else if (tab === 'quiz') { if (R) result(); else if (ME) lobby(); else authForm(); }
   else if (tab === 'rank') rank();
   else if (tab === 'att') att();
-  else if (tab === 'study') study();
+  else if (tab === 'study') (S.view === 'passage' ? passage() : study());
   else talk();
   if (anim) { UI.enter(M); window.scrollTo(0, 0); }
 }
@@ -137,7 +137,7 @@ function authForm() {
     const btn = $('as'); btn.disabled = true; $('ae').textContent = '';
     try {
       const d = await call(su ? '/api/signup' : '/api/login', { method: 'POST', body: { nick: $('an').value, pw: $('ap').value } });
-      token = d.token; LS.set('vb-token', token); ME = await call('/api/me'); ST.loaded = false; render(true);
+      token = d.token; LS.set('vb-token', token); ME = await call('/api/me'); ST.loaded = false; PL.loaded = false; render(true);
     } catch (x) { $('ae').textContent = x.message; btn.disabled = false; }
   };
 }
@@ -514,6 +514,7 @@ function bindGrid(words, onPick, rerender) {
 }
 // 특정 단어 카드 열기
 function openCard(deckKey, word) {
+  S.view = 'cards'; LS.set('vb-study-view', 'cards');
   if (S.deck !== deckKey) setDeck(deckKey);
   if (S.hideKnown && ST.known.has(word)) { S.hideKnown = false; saveSP(); }
   S.mode = 'card'; saveSP();
@@ -525,7 +526,7 @@ function openCard(deckKey, word) {
 
 /* ---------- 카드 학습 (시간 제한 없음) ---------- */
 const SP = (() => { try { return JSON.parse(LS.get('vb-study-pref') || '{}'); } catch (e) { return {}; } })();
-const S = { deck: SP.deck || 'u1', dir: SP.dir ? 1 : 0, mode: SP.mode === 'list' ? 'list' : 'card', shuffle: !!SP.shuffle, hideKnown: !!SP.hideKnown, hideMean: false, base: null, baseKey: '', i: 0, flip: false };
+const S = { deck: SP.deck || 'u1', dir: SP.dir ? 1 : 0, mode: SP.mode === 'list' ? 'list' : 'card', shuffle: !!SP.shuffle, hideKnown: !!SP.hideKnown, hideMean: false, base: null, baseKey: '', i: 0, flip: false, view: LS.get('vb-study-view') === 'passage' ? 'passage' : 'cards' };
 const SPOS = (() => { try { return JSON.parse(LS.get('vb-study-pos') || '{}'); } catch (e) { return {}; } })();
 const ST = { known: new Set(), star: new Set(), remote: false, loaded: false };
 if (!S.shuffle) S.i = Math.max(0, +SPOS[S.deck] || 0);
@@ -552,10 +553,10 @@ async function mark(word, field) {
   saveLocalST();
   if (ST.remote) {
     try { await call('/api/study', { method: 'POST', body: { word, [field]: on } }); }
-    catch (x) { on ? set.delete(word) : set.add(word); if (tab === 'study') { const e = $('se'); if (e) e.textContent = '저장하지 못했어요 · ' + x.message; study(); } return; }
+    catch (x) { on ? set.delete(word) : set.add(word); if (tab === 'study') { const e = $('se'); if (e) e.textContent = '저장하지 못했어요 · ' + x.message; S.view === 'passage' ? passage() : study(); } return; }
   }
   if (field === 'known' && on && S.mode === 'card' && !S.hideKnown) { S.flip = false; S.i++; savePos(); }
-  if (tab === 'study') study();
+  if (tab === 'study') (S.view === 'passage' ? passage() : study());
 }
 const deckName = (k) => (k === 'wrong' ? '오답노트' : k === 'star' ? '별표 단어' : 'Unit ' + pad(+k.slice(1)));
 function deckSource(k) {
@@ -570,7 +571,7 @@ function visibleDeck() {
   else { const have = new Set(S.base), now = new Set(src); S.base = S.base.filter((w) => now.has(w)).concat(src.filter((w) => !have.has(w))); }
   return S.hideKnown ? S.base.filter((w) => !ST.known.has(w)) : S.base;
 }
-function setDeck(k) { S.deck = k; S.base = null; S.i = S.shuffle ? 0 : Math.max(0, +SPOS[k] || 0); S.flip = false; saveSP(); }
+function setDeck(k) { S.view = 'cards'; LS.set('vb-study-view', 'cards'); S.deck = k; S.base = null; S.i = S.shuffle ? 0 : Math.max(0, +SPOS[k] || 0); S.flip = false; saveSP(); }
 
 function study() {
   if (!ST.loaded) { M.innerHTML = '<div class="vb-panel empty">학습 기록 불러오는 중…</div>'; loadStudy().then(() => tab === 'study' && !G && study()); return; }
@@ -622,6 +623,7 @@ function study() {
   }
   const pos = S.mode === 'card' && deck.length ? Math.min(S.i + 1, deck.length) : deck.length;
   M.innerHTML = `<section class="study">
+    ${viewSwitch('cards')}
     <div class="rank-head"><div><span class="eyebrow">STUDY · 시간 제한 없음</span><h1>카드 학습</h1></div>
       <small>${ME ? (ST.remote ? '외운 단어·별표가 계정에 저장돼요' : '오프라인 · 이 기기에만 저장 중') : '게스트 · 이 기기에만 저장돼요'}</small></div>
     <div class="hscroll" id="dk" role="tablist" aria-label="학습할 단어 묶음">${pills}</div>
@@ -636,6 +638,7 @@ function study() {
     <p class="err" id="se" role="alert"></p>
     ${body}
   </section>`;
+  bindViewSwitch();
   const dk = $('dk'); if (sl != null) dk.scrollLeft = sl; else dk.querySelector('.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   dk.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { setDeck(b.dataset.d); WL.q = ''; study(); }));
   M.querySelectorAll('#sdir button').forEach((b) => (b.onclick = () => { S.dir = +b.dataset.v; S.flip = false; saveSP(); study(); }));
@@ -678,7 +681,7 @@ function go(d) {
   const fc = $('fc'); if (fc) UI.restart(fc, d > 0 ? 'in-r' : 'in-l');
 }
 document.addEventListener('keydown', (e) => {
-  if (tab !== 'study' || G || S.mode !== 'card' || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (tab !== 'study' || S.view !== 'cards' || G || S.mode !== 'card' || e.altKey || e.ctrlKey || e.metaKey) return;
   const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
   const fc = $('fc'), w = fc ? visibleDeck()[S.i] : null;
   if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
@@ -688,6 +691,159 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'k' || e.key === 'K') mark(w, 'known');
   else if (e.key === 's' || e.key === 'S') mark(w, 'star');
   else if ((e.key === 'p' || e.key === 'P') && canSpeak) speak(w);
+});
+
+/* ---------- 수능 지문 (빈칸 추론 · 주제 · 제목) ---------- */
+const PQ = window.VB_PASSAGES || [];
+const PBY = Object.fromEntries(PQ.map((q) => [q.id, q]));
+const PTYPE = { blank: '빈칸 추론', topic: '주제', title: '제목' };
+const PASK = { blank: '다음 빈칸에 들어갈 말로 가장 적절한 것은?', topic: '다음 글의 주제로 가장 적절한 것은?', title: '다음 글의 제목으로 가장 적절한 것은?' };
+const PP = (() => { try { return JSON.parse(LS.get('vb-passage-pref') || '{}'); } catch (e) { return {}; } })();
+const P = { type: PP.type || 'all', mine: PP.mine !== false, wrongOnly: false, id: PP.id || null, pick: null, perm: {}, listOpen: false, pop: null };
+const PL = { log: {}, remote: false, loaded: false };
+const savePP = () => LS.set('vb-passage-pref', JSON.stringify({ type: P.type, mine: P.mine, id: P.id }));
+const NUM = ['①', '②', '③', '④', '⑤'];
+const pWords = (q) => {
+  const hs = [...q.text.matchAll(/\{([^}|]+)(?:\|([^}]+))?\}/g)].map((m) => (m[2] || m[1]).toLowerCase());
+  if (q.ans) hs.unshift(q.ans);
+  return [...new Set(hs)].filter((w) => BYW[w]);
+};
+const myWords = () => { const s = new Set(ST.star); wrongWords().forEach((x) => s.add(x.word)); return s; };
+async function loadPlog() {
+  if (ME) { try { PL.log = (await call('/api/plog')).log; PL.remote = true; PL.loaded = true; return; } catch (e) { /* 로컬로 */ } }
+  PL.remote = false; PL.loaded = true;
+  try { PL.log = JSON.parse(LS.get('vb-plog') || '{}'); } catch (e) { PL.log = {}; }
+}
+function pList() {
+  const mine = myWords();
+  let qs = PQ.filter((q) => P.type === 'all' || q.type === P.type);
+  if (P.wrongOnly) qs = qs.filter((q) => PL.log[q.id] && !PL.log[q.id].c);
+  if (P.mine) {
+    const score = (q) => pWords(q).filter((w) => mine.has(w)).length;
+    qs = qs.map((q, i) => ({ q, i, s: score(q) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.q);
+  }
+  return qs;
+}
+function perm(id) {
+  if (!P.perm[id]) P.perm[id] = sh([0, 1, 2, 3, 4]);
+  return P.perm[id];
+}
+// {단어} → 강조 버튼, ____ → 빈칸
+function renderText(q, reveal) {
+  const mine = myWords();
+  let html = esc(q.text).replace(/\{([^}|]+)(?:\|([^}]+))?\}/g, (_, surf, lem) => {
+    const w = (lem || surf).toLowerCase();
+    return `<button type="button" class="pw${mine.has(w) ? ' my' : ''}" data-pw="${esc(w)}">${surf}</button>`;
+  });
+  html = html.replace('____', reveal ? `<button type="button" class="blank filled" data-pw="${esc(q.ans)}">${esc(q.opts[0])}</button>` : '<span class="blank" aria-label="빈칸"></span>');
+  return html;
+}
+function pRecord(q, ok) {
+  const prev = PL.log[q.id];
+  PL.log[q.id] = { c: ok, n: (prev ? prev.n : 0) + 1 };
+  if (PL.remote) call('/api/plog', { method: 'POST', body: { qid: q.id, correct: ok } }).catch(() => { const e = $('pe'); if (e) e.textContent = '기록을 저장하지 못했어요. 인터넷 연결을 확인하세요'; });
+  else LS.set('vb-plog', JSON.stringify(PL.log));
+}
+const viewSwitch = (v) => `<div class="seg view-sw" id="svw" role="tablist" aria-label="학습 방식"><button type="button" role="tab" data-v="cards" class="${v === 'cards' ? 'on' : ''}" aria-selected="${v === 'cards'}">단어 카드</button><button type="button" role="tab" data-v="passage" class="${v === 'passage' ? 'on' : ''}" aria-selected="${v === 'passage'}">수능 지문</button></div>`;
+function bindViewSwitch() {
+  M.querySelectorAll('#svw button').forEach((b) => (b.onclick = () => { S.view = b.dataset.v; LS.set('vb-study-view', S.view); render(true); }));
+}
+
+function passage() {
+  if (!ST.loaded || !PL.loaded) {
+    M.innerHTML = `<section class="study">${viewSwitch('passage')}<div class="vb-panel empty">학습 기록 불러오는 중…</div></section>`;
+    bindViewSwitch();
+    Promise.all([ST.loaded ? 0 : loadStudy(), PL.loaded ? 0 : loadPlog()]).then(() => { if (tab === 'study' && S.view === 'passage' && !G) passage(); });
+    return;
+  }
+  const list = pList(), all = PQ.filter((q) => P.type === 'all' || q.type === P.type);
+  const solved = all.filter((q) => PL.log[q.id]), right = solved.filter((q) => PL.log[q.id].c).length;
+  const wrongN = all.filter((q) => PL.log[q.id] && !PL.log[q.id].c).length;
+  if (!list.find((q) => q.id === P.id)) { P.id = list.length ? (list.find((q) => !PL.log[q.id]) || list[0]).id : null; P.pick = null; }
+  const idx = list.findIndex((q) => q.id === P.id), q = P.id ? PBY[P.id] : null;
+  const tg = (id, on, label) => `<button type="button" class="tgl${on ? ' on' : ''}" id="${id}" aria-pressed="${on}"><span class="sw" aria-hidden="true"></span>${label}</button>`;
+  const mine = myWords();
+  let body;
+  if (!q) {
+    body = `<div class="vb-panel empty"><b>${P.wrongOnly ? '틀린 문제가 없어요' : '문제가 없어요'}</b>${P.wrongOnly ? '모두 맞혔거나 아직 푼 문제가 없어요' : ''}</div>`;
+  } else {
+    const pm = perm(q.id), done = P.pick != null, ci = pm.indexOf(0), log = PL.log[q.id];
+    const ws = pWords(q);
+    body = `<article class="pq vb-panel" id="pq" aria-labelledby="pqh">
+      <div class="pq-top"><span class="vb-chip ty-${q.type}">${PTYPE[q.type]}</span>${ws.some((w) => mine.has(w)) ? '<span class="vb-chip my-chip">★ 내 단어 포함</span>' : ''}${log ? `<span class="vb-chip ${log.c ? 'ok' : 'no'}">${log.c ? '맞힘' : '틀림'} · ${log.n}회</span>` : ''}<span class="pq-no">${idx + 1} / ${list.length}</span></div>
+      <h2 class="pq-q" id="pqh"><b>${pad(idx + 1)}.</b> ${PASK[q.type]}</h2>
+      <div class="pq-text" lang="en">${renderText(q, done)}</div>
+      <p class="note pq-tip">밑줄 친 단어를 누르면 뜻을 볼 수 있어요${mine.size ? ' · <span class="my-dot"></span> 내 별표·오답 단어' : ''}</p>
+      <div class="pq-pop" id="pqp" hidden></div>
+      <ol class="pq-opts${done ? ' locked' : ''}" id="po">${pm.map((oi, k) => {
+        const cls = done ? (k === ci ? ' is-correct' : k === P.pick ? ' is-wrong' : '') : '';
+        return `<li><button type="button" class="vb-option${cls}" data-o="${k}" ${done ? 'disabled' : ''}><span class="k">${NUM[k]}</span><span class="t" lang="en">${esc(q.opts[oi])}</span>${done && k === ci ? '<span class="mk">정답</span>' : done && k === P.pick ? '<span class="mk">내 답</span>' : ''}</button></li>`;
+      }).join('')}</ol>
+      ${done ? `<div class="pq-exp ${P.pick === ci ? 'ok' : 'no'}" role="status">
+        <b class="verdict">${P.pick === ci ? '정답입니다!' : `아쉬워요. 정답은 ${NUM[ci]}번`}</b>
+        <p>${esc(q.exp).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>
+        ${ws.length ? `<div class="pq-words"><small>지문 속 단어</small><ul>${ws.map((w) => `<li><b lang="en">${esc(w)}</b><span>${esc(BYW[w].m)}</span><button type="button" class="ic st${ST.star.has(w) ? ' on' : ''}" data-ps="${esc(w)}" aria-label="${esc(w)} 별표" aria-pressed="${ST.star.has(w)}">★</button></li>`).join('')}</ul></div>` : ''}
+      </div>` : ''}
+    </article>
+    <div class="fc-nav pq-nav">
+      <button type="button" class="vb-secondary" id="pprev" ${idx > 0 ? '' : 'disabled'}>‹ 이전</button>
+      <button type="button" class="vb-secondary" id="pretry" ${done ? '' : 'disabled'}>다시 풀기</button>
+      <button type="button" class="vb-primary" id="pnext" ${idx < list.length - 1 ? '' : 'disabled'}>다음 문제 ›</button>
+    </div>
+    <p class="kbd-hint"><kbd>1</kbd>–<kbd>5</kbd> 선택 · <kbd>←</kbd><kbd>→</kbd> 이동 · <kbd>R</kbd> 다시 풀기</p>
+    <button type="button" class="wl-tog" id="plt" aria-expanded="${P.listOpen}" aria-controls="plp"><span>문제 목록 ${P.listOpen ? '접기' : '펼치기'} · ${list.length}문제</span><i aria-hidden="true">${P.listOpen ? '▴' : '▾'}</i></button>
+    <div class="wl-p" id="plp" ${P.listOpen ? '' : 'hidden'}>${P.listOpen ? `<div class="pgrid">${list.map((x, i) => { const lg = PL.log[x.id]; return `<button type="button" class="pg${x.id === P.id ? ' cur' : ''}${lg ? (lg.c ? ' ok' : ' no') : ''}" data-pi="${x.id}" aria-label="${i + 1}번 ${PTYPE[x.type]}${lg ? (lg.c ? ' 맞힘' : ' 틀림') : ' 안 푼 문제'}"><b>${i + 1}</b><small>${PTYPE[x.type]}</small></button>`; }).join('')}</div>` : ''}</div>`;
+  }
+  M.innerHTML = `<section class="study passage">
+    ${viewSwitch('passage')}
+    <div class="rank-head"><div><span class="eyebrow">CSAT READING · 시간 제한 없음</span><h1>수능 지문 연습</h1></div>
+      <small>${ME ? (PL.remote ? '풀이 기록이 계정에 저장돼요' : '오프라인 · 이 기기에만 저장 중') : '게스트 · 이 기기에만 저장돼요'}</small></div>
+    <div class="hscroll" id="pt" role="tablist" aria-label="문제 유형">${[['all', '전체'], ['blank', '빈칸 추론'], ['topic', '주제'], ['title', '제목']].map(([v, l]) => `<button type="button" role="tab" class="pill${P.type === v ? ' on' : ''}" data-t="${v}" aria-selected="${P.type === v}">${l} ${v === 'all' ? PQ.length : PQ.filter((x) => x.type === v).length}</button>`).join('')}</div>
+    <div class="s-ctrl">${tg('pmine', P.mine, '내 단어 문제 먼저')}${tg('pwrong', P.wrongOnly, `틀린 문제만${wrongN ? ' ' + wrongN : ''}`)}</div>
+    <div class="s-prog"><div class="row"><b>푼 문제 ${solved.length} / ${all.length}</b><span>정답률 <b>${solved.length ? Math.round(right / solved.length * 100) : 0}%</b></span></div>
+      <div class="vb-progress"><span style="width:${(solved.length / Math.max(1, all.length) * 100).toFixed(1)}%"></span></div></div>
+    <p class="err" id="pe" role="alert"></p>
+    ${body}
+  </section>`;
+  bindViewSwitch();
+  M.querySelectorAll('#pt [data-t]').forEach((b) => (b.onclick = () => { P.type = b.dataset.t; P.id = null; P.pick = null; savePP(); passage(); }));
+  $('pmine').onclick = () => { P.mine = !P.mine; savePP(); passage(); };
+  $('pwrong').onclick = () => { P.wrongOnly = !P.wrongOnly; P.id = null; P.pick = null; passage(); };
+  if (!q) return;
+  const go2 = (id) => { P.id = id; P.pick = null; delete P.perm[id]; savePP(); passage(); const el = $('pq'); if (el) { el.scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); UI.restart(el, 'in-r'); } };
+  M.querySelectorAll('#po [data-o]').forEach((b) => (b.onclick = () => {
+    if (P.pick != null) return;
+    P.pick = +b.dataset.o; const ok = perm(q.id)[P.pick] === 0;
+    pRecord(q, ok); passage();
+    if (ok) UI.floatText($('po').children[P.pick].firstElementChild, '정답!'); else { UI.buzz(60); UI.restart($('po').children[P.pick].firstElementChild, 'shake'); }
+    say(ok ? '정답입니다' : `오답. 정답은 ${perm(q.id).indexOf(0) + 1}번`);
+    $('pq').querySelector('.pq-exp')?.scrollIntoView({ block: 'nearest', behavior: UI.reduceMotion ? 'auto' : 'smooth' });
+  }));
+  const pr = $('pprev'); if (pr) pr.onclick = () => idx > 0 && go2(list[idx - 1].id);
+  const nx = $('pnext'); if (nx) nx.onclick = () => idx < list.length - 1 && go2(list[idx + 1].id);
+  const rt = $('pretry'); if (rt) rt.onclick = () => go2(q.id);
+  $('plt').onclick = () => { P.listOpen = !P.listOpen; passage(); if (P.listOpen) $('plt').scrollIntoView({ block: 'start' }); };
+  M.querySelectorAll('[data-pi]').forEach((b) => (b.onclick = () => { P.listOpen = false; go2(b.dataset.pi); }));
+  M.querySelectorAll('[data-ps]').forEach((b) => (b.onclick = () => mark(b.dataset.ps, 'star')));
+  // 단어 뜻 팝업
+  const pop = $('pqp');
+  M.querySelectorAll('.pq-text [data-pw]').forEach((b) => (b.onclick = () => {
+    const w = b.dataset.pw, x = BYW[w]; if (!x) return;
+    if (!pop.hidden && pop.dataset.w === w) { pop.hidden = true; return; }
+    pop.dataset.w = w;
+    pop.innerHTML = `<b lang="en">${esc(x.w)}</b><span>${esc(x.m)}</span><small>Unit ${pad(x.u)}</small>${canSpeak ? `<button type="button" class="ic" id="pps" aria-label="발음 듣기">${spkSVG}</button>` : ''}<button type="button" class="ic st${ST.star.has(w) ? ' on' : ''}" id="ppst" aria-label="별표" aria-pressed="${ST.star.has(w)}">★</button>`;
+    pop.hidden = false;
+    const s1 = $('pps'); if (s1) s1.onclick = () => speak(x.w);
+    $('ppst').onclick = () => mark(w, 'star');
+  }));
+}
+document.addEventListener('keydown', (e) => {
+  if (tab !== 'study' || S.view !== 'passage' || G || e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  if (/^[1-5]$/.test(e.key)) { const b = M.querySelector(`#po [data-o="${+e.key - 1}"]`); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'ArrowRight') { const b = $('pnext'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'ArrowLeft') { const b = $('pprev'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'r' || e.key === 'R') { const b = $('pretry'); if (b && !b.disabled) b.click(); }
 });
 
 /* ---------- 출석부 ---------- */

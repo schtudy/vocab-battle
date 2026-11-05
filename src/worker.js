@@ -189,6 +189,23 @@ async function api(req, env, path) {
     return json({ word: w, known: !!k, star: !!st });
   }
 
+  if (path === "/api/plog" && m === "GET") {
+    const r = await env.DB.prepare("SELECT qid, correct, tries FROM plog WHERE uid = ?").bind(u.id).all();
+    const out = {};
+    for (const x of r.results) out[x.qid] = { c: !!x.correct, n: x.tries };
+    return json({ log: out });
+  }
+
+  if (path === "/api/plog" && m === "POST") {
+    const { qid, correct } = await body(req);
+    const q = String(qid || "");
+    if (!/^[a-z]\d{2,3}$/.test(q)) return err("잘못된 문제예요");
+    await env.DB.prepare(
+      "INSERT INTO plog(uid, qid, correct, tries, at) VALUES (?, ?, ?, 1, ?) ON CONFLICT(uid, qid) DO UPDATE SET correct = excluded.correct, tries = plog.tries + 1, at = excluded.at"
+    ).bind(u.id, q, correct ? 1 : 0, Date.now()).run();
+    return json({ ok: true });
+  }
+
   if (path === "/api/logout" && m === "POST") {
     const token = req.headers.get("authorization").slice(7);
     await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();

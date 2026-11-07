@@ -30,7 +30,7 @@ const say = (t) => { const l = $('live'); l.textContent = ''; setTimeout(() => {
 let token = LS.get('vb-token'), ME = null, tab = 'quiz';
 let unit = Math.min(UNITS, Math.max(1, +(LS.get('vb-unit') || 1) || 1)), dir = +(LS.get('vb-dir') || 0) ? 1 : 0;
 let rankU = 0, rankRows = null, comments = null, authMode = 'login', editing = false;
-let attToday = null, attRank = null, attMonth = null, attRankMode = 'streak', attFresh = false;
+let attToday = null, attRank = null, attMonth = null, attRankMode = 'streak', attFresh = false, attEvent = null;
 const attDays = {}; // 'YYYY-MM' -> 출석한 날짜 배열
 let G = null, R = null; // 진행 중 게임, 마지막 결과
 const mini = {};        // Unit별 TOP 3 캐시
@@ -88,6 +88,7 @@ function render(anim) {
   else if (tab === 'rank') rank();
   else if (tab === 'att') att();
   else if (tab === 'study') (S.view === 'passage' ? passage() : study());
+  else if (tab === 'admin') admin();
   else talk();
   if (anim) { UI.enter(M); window.scrollTo(0, 0); }
 }
@@ -95,8 +96,8 @@ function render(anim) {
 /* ---------- 타이머 링 마크업 ---------- */
 const ringSVG = () => `<svg viewBox="0 0 120 120" aria-hidden="true">
   <defs>
-    <linearGradient id="vbArc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c7ff63"/><stop offset="1" stop-color="#38d9ff"/></linearGradient>
-    <linearGradient id="vbArcHot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6eb4"/><stop offset="1" stop-color="#ff637d"/></linearGradient>
+    <linearGradient id="vbArc" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--vb-lime)"/><stop offset="1" style="stop-color:var(--vb-cyan)"/></linearGradient>
+    <linearGradient id="vbArcHot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--vb-pink)"/><stop offset="1" style="stop-color:var(--vb-danger)"/></linearGradient>
   </defs>
   <circle class="trk" cx="60" cy="60" r="50"/>
   <circle class="arc" cx="60" cy="60" r="50" transform="rotate(-90 60 60)" stroke-dasharray="${RING.toFixed(2)}" stroke-dashoffset="0"/>
@@ -693,7 +694,7 @@ document.addEventListener('keydown', (e) => {
   else if ((e.key === 'p' || e.key === 'P') && canSpeak) speak(w);
 });
 
-/* ---------- 수능 지문 (빈칸 추론 · 주제 · 제목) ---------- */
+/* ---------- 수능형 지문 (최신 이슈 · 빈칸 추론 · 주제 · 제목) ---------- */
 const PQ = window.VB_PASSAGES || [];
 const PBY = Object.fromEntries(PQ.map((q) => [q.id, q]));
 const PTYPE = { blank: '빈칸 추론', topic: '주제', title: '제목' };
@@ -703,10 +704,34 @@ const P = { type: PP.type || 'all', mine: PP.mine !== false, wrongOnly: false, i
 const PL = { log: {}, remote: false, loaded: false };
 const savePP = () => LS.set('vb-passage-pref', JSON.stringify({ type: P.type, mine: P.mine, id: P.id }));
 const NUM = ['①', '②', '③', '④', '⑤'];
-const pWords = (q) => {
-  const hs = [...q.text.matchAll(/\{([^}|]+)(?:\|([^}]+))?\}/g)].map((m) => (m[2] || m[1]).toLowerCase());
-  if (q.ans) hs.unshift(q.ans);
-  return [...new Set(hs)].filter((w) => BYW[w]);
+// 단어장 3,000단어 자동 인식 → 각주. {표면형|원형}으로 직접 지정, q.no로 제외
+const lemma = (t) => {
+  t = t.toLowerCase(); if (BYW[t]) return t;
+  const c = [];
+  for (const [suf, r] of [['ies', 'y'], ['ied', 'y'], ['es', ''], ['s', ''], ['ed', ''], ['ed', 'e'], ['d', ''], ['ing', ''], ['ing', 'e'], ['ly', ''], ['er', ''], ['est', '']])
+    if (t.endsWith(suf) && t.length - suf.length >= 3) c.push(t.slice(0, -suf.length) + r);
+  const m = t.match(/^(.+)([bcdfgklmnprstvz])\2(ed|ing)$/); if (m) c.push(m[1] + m[2]);
+  return c.find((x) => BYW[x]) || null;
+};
+const PSCAN = {};
+function pScan(q) {
+  if (PSCAN[q.id]) return PSCAN[q.id];
+  const no = new Set(q.no || []), fn = [], at = {}, parts = [];
+  let last = 0;
+  for (const m of q.text.matchAll(/\{([^}|]+)(?:\|([^}]+))?\}|[A-Za-z]+(?:-[A-Za-z]+)?/g)) {
+    parts.push(esc(q.text.slice(last, m.index))); last = m.index + m[0].length;
+    const surf = m[1] || m[0], w = m[1] ? (m[2] || m[1]).toLowerCase() : lemma(m[0]);
+    if (w && BYW[w] && !no.has(w)) { if (!at[w]) { fn.push(w); at[w] = fn.length; } parts.push({ surf, w, n: at[w] }); }
+    else parts.push(esc(surf));
+  }
+  parts.push(esc(q.text.slice(last)));
+  return (PSCAN[q.id] = { parts, fn });
+}
+// 각주 단어 목록(빈칸 정답은 정답 공개 후에만 포함)
+const pWords = (q, reveal = true) => {
+  const fn = [...pScan(q).fn];
+  if (reveal && q.ans && BYW[q.ans] && !fn.includes(q.ans)) fn.push(q.ans);
+  return fn;
 };
 const myWords = () => { const s = new Set(ST.star); wrongWords().forEach((x) => s.add(x.word)); return s; };
 async function loadPlog() {
@@ -728,15 +753,23 @@ function perm(id) {
   if (!P.perm[id]) P.perm[id] = sh([0, 1, 2, 3, 4]);
   return P.perm[id];
 }
-// {단어} → 강조 버튼, ____ → 빈칸
+// 단어장 단어 → 밑줄 + 각주 번호, ____ → 빈칸
 function renderText(q, reveal) {
-  const mine = myWords();
-  let html = esc(q.text).replace(/\{([^}|]+)(?:\|([^}]+))?\}/g, (_, surf, lem) => {
-    const w = (lem || surf).toLowerCase();
-    return `<button type="button" class="pw${mine.has(w) ? ' my' : ''}" data-pw="${esc(w)}">${surf}</button>`;
-  });
-  html = html.replace('____', reveal ? `<button type="button" class="blank filled" data-pw="${esc(q.ans)}">${esc(q.opts[0])}</button>` : '<span class="blank" aria-label="빈칸"></span>');
+  const mine = myWords(), fn = pWords(q, reveal);
+  let html = pScan(q).parts.map((x) => (typeof x === 'string' ? x
+    : `<button type="button" class="pw${mine.has(x.w) ? ' my' : ''}" data-pw="${esc(x.w)}">${esc(x.surf)}<sup>${x.n}</sup></button>`)).join('');
+  const an = fn.indexOf(q.ans) + 1;
+  html = html.replace('____', reveal ? `<button type="button" class="blank filled" data-pw="${esc(q.ans)}">${esc(q.opts[0])}${an ? `<sup>${an}</sup>` : ''}</button>` : '<span class="blank" aria-label="빈칸"></span>');
   return html;
+}
+// 각주: 번호 · 단어 · Unit · 뜻 · 별표 ON/OFF (내 별표 상태 그대로 반영, 누르면 바뀜)
+function footnotes(q, reveal) {
+  const fn = pWords(q, reveal);
+  if (!fn.length) return '';
+  return `<ol class="pq-fn" aria-label="각주 · 단어장 단어">${fn.map((w, i) => {
+    const x = BYW[w], on = ST.star.has(w);
+    return `<li><sup>${i + 1}</sup><b lang="en">${esc(x.w)}</b><span class="u">Unit ${pad(x.u)}</span><span class="m">${esc(x.m)}</span><button type="button" class="fn-st${on ? ' on' : ''}" data-ps="${esc(w)}" aria-pressed="${on}" aria-label="${esc(w)} 별표 ${on ? '끄기' : '켜기'}"><i aria-hidden="true">★</i>${on ? 'ON' : 'OFF'}</button></li>`;
+  }).join('')}</ol>`;
 }
 function pRecord(q, ok) {
   const prev = PL.log[q.id];
@@ -744,7 +777,7 @@ function pRecord(q, ok) {
   if (PL.remote) call('/api/plog', { method: 'POST', body: { qid: q.id, correct: ok } }).catch(() => { const e = $('pe'); if (e) e.textContent = '기록을 저장하지 못했어요. 인터넷 연결을 확인하세요'; });
   else LS.set('vb-plog', JSON.stringify(PL.log));
 }
-const viewSwitch = (v) => `<div class="seg view-sw" id="svw" role="tablist" aria-label="학습 방식"><button type="button" role="tab" data-v="cards" class="${v === 'cards' ? 'on' : ''}" aria-selected="${v === 'cards'}">단어 카드</button><button type="button" role="tab" data-v="passage" class="${v === 'passage' ? 'on' : ''}" aria-selected="${v === 'passage'}">수능 지문</button></div>`;
+const viewSwitch = (v) => `<div class="seg view-sw" id="svw" role="tablist" aria-label="학습 방식"><button type="button" role="tab" data-v="cards" class="${v === 'cards' ? 'on' : ''}" aria-selected="${v === 'cards'}">단어 카드</button><button type="button" role="tab" data-v="passage" class="${v === 'passage' ? 'on' : ''}" aria-selected="${v === 'passage'}">수능형 지문</button></div>`;
 function bindViewSwitch() {
   M.querySelectorAll('#svw button').forEach((b) => (b.onclick = () => { S.view = b.dataset.v; LS.set('vb-study-view', S.view); render(true); }));
 }
@@ -768,12 +801,13 @@ function passage() {
     body = `<div class="vb-panel empty"><b>${P.wrongOnly ? '틀린 문제가 없어요' : '문제가 없어요'}</b>${P.wrongOnly ? '모두 맞혔거나 아직 푼 문제가 없어요' : ''}</div>`;
   } else {
     const pm = perm(q.id), done = P.pick != null, ci = pm.indexOf(0), log = PL.log[q.id];
-    const ws = pWords(q);
+    const ws = pWords(q, done);
     body = `<article class="pq vb-panel" id="pq" aria-labelledby="pqh">
-      <div class="pq-top"><span class="vb-chip ty-${q.type}">${PTYPE[q.type]}</span>${ws.some((w) => mine.has(w)) ? '<span class="vb-chip my-chip">★ 내 단어 포함</span>' : ''}${log ? `<span class="vb-chip ${log.c ? 'ok' : 'no'}">${log.c ? '맞힘' : '틀림'} · ${log.n}회</span>` : ''}<span class="pq-no">${idx + 1} / ${list.length}</span></div>
+      <div class="pq-top"><span class="vb-chip ty-${q.type}">${PTYPE[q.type]}</span>${q.tag ? `<span class="vb-chip tag-chip">${esc(q.tag)}</span>` : ''}${ws.some((w) => mine.has(w)) ? '<span class="vb-chip my-chip">★ 내 단어 포함</span>' : ''}${log ? `<span class="vb-chip ${log.c ? 'ok' : 'no'}">${log.c ? '맞힘' : '틀림'} · ${log.n}회</span>` : ''}<span class="pq-no">${idx + 1} / ${list.length}</span></div>
       <h2 class="pq-q" id="pqh"><b>${pad(idx + 1)}.</b> ${PASK[q.type]}</h2>
       <div class="pq-text" lang="en">${renderText(q, done)}</div>
-      <p class="note pq-tip">밑줄 친 단어를 누르면 뜻을 볼 수 있어요${mine.size ? ' · <span class="my-dot"></span> 내 별표·오답 단어' : ''}</p>
+      ${footnotes(q, done)}
+      <p class="note pq-tip">번호가 붙은 단어는 단어장 3,000단어예요 · 각주의 ★ ON/OFF로 별표를 바꿀 수 있어요${mine.size ? ' · <span class="my-dot"></span> 내 별표·오답 단어' : ''}</p>
       <div class="pq-pop" id="pqp" hidden></div>
       <ol class="pq-opts${done ? ' locked' : ''}" id="po">${pm.map((oi, k) => {
         const cls = done ? (k === ci ? ' is-correct' : k === P.pick ? ' is-wrong' : '') : '';
@@ -782,7 +816,6 @@ function passage() {
       ${done ? `<div class="pq-exp ${P.pick === ci ? 'ok' : 'no'}" role="status">
         <b class="verdict">${P.pick === ci ? '정답입니다!' : `아쉬워요. 정답은 ${NUM[ci]}번`}</b>
         <p>${esc(q.exp).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>
-        ${ws.length ? `<div class="pq-words"><small>지문 속 단어</small><ul>${ws.map((w) => `<li><b lang="en">${esc(w)}</b><span>${esc(BYW[w].m)}</span><button type="button" class="ic st${ST.star.has(w) ? ' on' : ''}" data-ps="${esc(w)}" aria-label="${esc(w)} 별표" aria-pressed="${ST.star.has(w)}">★</button></li>`).join('')}</ul></div>` : ''}
       </div>` : ''}
     </article>
     <div class="fc-nav pq-nav">
@@ -796,7 +829,7 @@ function passage() {
   }
   M.innerHTML = `<section class="study passage">
     ${viewSwitch('passage')}
-    <div class="rank-head"><div><span class="eyebrow">CSAT READING · 시간 제한 없음</span><h1>수능 지문 연습</h1></div>
+    <div class="rank-head"><div><span class="eyebrow">2026 ISSUE READING · 시간 제한 없음</span><h1>수능형 지문</h1></div>
       <small>${ME ? (PL.remote ? '풀이 기록이 계정에 저장돼요' : '오프라인 · 이 기기에만 저장 중') : '게스트 · 이 기기에만 저장돼요'}</small></div>
     <div class="hscroll" id="pt" role="tablist" aria-label="문제 유형">${[['all', '전체'], ['blank', '빈칸 추론'], ['topic', '주제'], ['title', '제목']].map(([v, l]) => `<button type="button" role="tab" class="pill${P.type === v ? ' on' : ''}" data-t="${v}" aria-selected="${P.type === v}">${l} ${v === 'all' ? PQ.length : PQ.filter((x) => x.type === v).length}</button>`).join('')}</div>
     <div class="s-ctrl">${tg('pmine', P.mine, '내 단어 문제 먼저')}${tg('pwrong', P.wrongOnly, `틀린 문제만${wrongN ? ' ' + wrongN : ''}`)}</div>
@@ -864,11 +897,11 @@ function attBadge() {
 async function loadAtt(all) {
   const today = (attToday && attToday.day) || kstToday();
   if (!attMonth) attMonth = today.slice(0, 7);
-  const jobs = [call('/api/attend/today'), call('/api/attend/rank')];
+  const jobs = [call('/api/attend/today'), call('/api/attend/rank'), call('/api/event').catch(() => attEvent)];
   if (ME && (all || !attDays[attMonth])) jobs.push(call('/api/attend?month=' + attMonth));
-  const [t, r, mine] = await Promise.all(jobs);
-  let changed = JSON.stringify(t) !== JSON.stringify(attToday) || JSON.stringify(r) !== JSON.stringify(attRank);
-  attToday = t; attRank = r;
+  const [t, r, ev, mine] = await Promise.all(jobs);
+  let changed = JSON.stringify(t) !== JSON.stringify(attToday) || JSON.stringify(r) !== JSON.stringify(attRank) || JSON.stringify(ev) !== JSON.stringify(attEvent);
+  attToday = t; attRank = r; attEvent = ev || null;
   if (mine) {
     changed = changed || JSON.stringify(mine.days) !== JSON.stringify(attDays[mine.month]);
     attDays[mine.month] = mine.days;
@@ -894,6 +927,29 @@ function calendar() {
     <p class="note cal-sum">${ME ? `이번 달 ${(attDays[ym] || []).length}일 출석` : '로그인하면 내 출석 달력이 보여요'}</p>`;
 }
 
+// 출석 이벤트 배너 — 관리자가 정한 기간 안에 출석한 학생 중 합산 점수 상위 N명(기본 2명) 특별 보상
+const mdw = (d) => { const x = new Date(d + 'T00:00:00Z'); return `${x.getUTCMonth() + 1}/${x.getUTCDate()}(${WD[x.getUTCDay()]})`; };
+const dDay = (from, to) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
+function eventPanel() {
+  const E = attEvent; if (!E || !E.event) return '';
+  const ev = E.event, n = ev.winners || 2, live = E.state === 'live', ended = E.state === 'ended';
+  const dd = live ? dDay(E.today, ev.end) : E.state === 'upcoming' ? dDay(E.today, ev.start) : 0;
+  const badge = live ? (dd ? `마감 D-${dd}` : '오늘 마감') : ended ? '이벤트 종료' : `시작 D-${dd}`;
+  const me = E.me, a = ME && ME.attend;
+  const status = !ME ? '로그인하고 기간 안에 출석하면 참가돼요'
+    : me ? `참가 중 · 현재 <b>${me.rank}위</b> · 합산 ${fmt(me.score)}점 · 기간 내 ${me.days}일 출석${me.rank <= n ? ' · <span class="ev-in">보상권</span>' : ''}`
+    : live ? (a && a.checked ? '참가 처리 중…' : '아직 참가 전이에요 · <b>오늘 출석 도장</b>을 찍으면 바로 참가!') : ended ? '이번 이벤트에는 참가 기록이 없어요' : '시작일부터 출석하면 참가돼요';
+  const rows = E.top || [];
+  return `<div class="evp vb-panel" id="evp">
+    <div class="ev-h"><span class="ev-ic" aria-hidden="true">🏆</span><div><span class="eyebrow">ATTENDANCE EVENT</span><h2>${esc(ev.title)}</h2></div><span class="vb-chip ev-dd${live ? ' live' : ''}">${badge}</span></div>
+    <p class="ev-rule"><b>${mdw(ev.start)} ~ ${mdw(ev.end)}</b> 기간에 <b>출석한 학생 한정</b>, 마감일까지 <b>합산 점수 상위 ${n}명</b>에게 <b class="ev-rw">${esc(ev.reward)}</b>이 있어요!</p>
+    <p class="note ev-me">${status}</p>
+    ${E.state === 'upcoming' ? '' : !rows.length ? '<p class="empty">아직 참가자가 없어요 · 1등으로 출석해보세요</p>'
+      : `<ol class="mini ev-list">${rows.slice(0, Math.max(5, n)).map((x, i) => { const mi = ME && x.nick === ME.nick; return `<li class="${mi ? 'mine' : ''}${i < n ? ' win' : ''}"><span class="rk${i < 3 ? ' vb-rank-' + (i + 1) : ''}">${i + 1}</span><b>${esc(x.nick)}${mi ? '<span class="you">나</span>' : ''}${i < n ? `<span class="vb-chip ev-gift">${ended ? '수상' : '보상권'}</span>` : ''}</b><span>${fmt(x.score)}점</span></li>`; }).join('')}</ol>
+      <small class="ev-foot">참가 ${E.joined || 0}명 · 동점이면 기간 내 출석일이 많은 순${ended ? ' · 마감 시점 기록으로 확정' : ''}</small>`}
+  </div>`;
+}
+
 function att() {
   const draft = $('am2') ? $('am2').value : '';
   const rows = attToday ? attToday.rows : null, day = (attToday && attToday.day) || kstToday();
@@ -902,11 +958,12 @@ function att() {
   if (!attMonth) attMonth = day.slice(0, 7);
   M.innerHTML = `<section class="att">
     <div class="rank-head"><div><span class="eyebrow">ATTENDANCE</span><h1>출석부</h1></div><small><i class="live-dot"></i>오늘 ${rows ? rows.length : '–'}명 출석</small></div>
+    ${eventPanel()}
     <div class="att-grid"><div class="att-col">
       <div class="stampp vb-panel vb-glow" id="sp">
         <div class="ph"><div><span class="eyebrow">TODAY</span><h2>${dayLabel(day)}</h2></div></div>
         ${!ME ? `<div class="stamp-zone"><div class="seal empty"><span>출석</span></div><p class="note">로그인하면 매일 출석 도장을 찍을 수 있어요.</p><button type="button" class="vb-primary" id="ag">로그인 / 가입</button></div>`
-        : a && a.checked ? `<div class="stamp-zone"><div class="seal${attFresh ? ' fresh' : ''}" id="seal"><img src="/images/logo-mark.svg" alt="" width="44" height="44"><b>출석</b><small>${day.slice(5).replace('-', '.')}</small></div>
+        : a && a.checked ? `<div class="stamp-zone"><div class="seal${attFresh ? ' fresh' : ''}" id="seal"><img src="/images/school-emblem-128.png" alt="" width="44" height="44"><b>출석</b><small>${day.slice(5).replace('-', '.')}</small></div>
             <p class="stamp-msg"><b>출석 완료!</b> ${myOrder ? `오늘 ${myOrder}번째로 왔어요` : ''}</p></div>`
         : `<form class="stamp-zone" id="af2" novalidate><div class="seal empty"><span>?</span></div>
             <div class="field"><label for="am2">오늘의 한마디 <small>(선택 · 50자)</small></label><input class="input" id="am2" maxlength="50" placeholder="예: 오늘은 Unit 5 정복한다"></div>
@@ -957,6 +1014,104 @@ function att() {
   $('cx').onclick = () => { attMonth = shiftMonth(attMonth, 1); att(); if (ME && !attDays[attMonth]) loadAtt().then(() => tab === 'att' && !G && att()).catch(() => {}); };
   M.querySelectorAll('#arm button').forEach((b) => (b.onclick = () => { attRankMode = b.dataset.v; att(); }));
 }
+
+/* ---------- 관리자 모드 ----------
+   기능 추가 방법: ADMIN_SECTIONS 배열에 { id, title, desc, key(서버 SETTINGS 이름), form(값) → HTML, read() → 저장할 값 } 를 하나 더 넣으면 끝.
+   서버 쪽은 src/worker.js 의 SETTINGS 에 같은 key로 검사 함수를 추가하세요. */
+const AD = { token: LS.get('vb-admin'), exp: +(LS.get('vb-admin-exp') || 0), settings: null, msg: {} };
+const adminOn = () => !!AD.token && AD.exp > Date.now();
+async function acall(path, opt = {}) {
+  let r;
+  try { r = await fetch(path, { method: opt.method || 'GET', headers: { 'content-type': 'application/json', 'x-admin-token': AD.token || '' }, body: opt.body ? JSON.stringify(opt.body) : undefined }); }
+  catch (e) { throw new Error('인터넷 연결을 확인하세요'); }
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 403) adminLogout();
+  if (!r.ok) throw new Error(d.error || '요청이 실패했어요');
+  return d;
+}
+function adminLogout() { AD.token = null; AD.exp = 0; AD.settings = null; LS.set('vb-admin', null); LS.set('vb-admin-exp', null); }
+const addDays = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const ADMIN_SECTIONS = [
+  {
+    id: 'event', key: 'event', title: '출석 이벤트', desc: '기간 안에 출석한 학생 중 합산 점수 상위 학생에게 보상. 마감일이 지나면 그 시점 순위로 수상자가 고정돼요.',
+    form(v) {
+      const t = kstToday(), x = v || { title: '출석 이벤트', start: t, end: addDays(t, 14), reward: '특별한 보상', winners: 2 };
+      return `<div class="adm-f">
+        <label class="field"><span>이벤트 이름</span><input class="input" id="ev-title" maxlength="40" value="${esc(x.title)}"></label>
+        <div class="adm-2"><label class="field"><span>시작일</span><input class="input" type="date" id="ev-start" value="${esc(x.start)}"></label>
+        <label class="field"><span>마감일 (이 날까지)</span><input class="input" type="date" id="ev-end" value="${esc(x.end)}"></label></div>
+        <div class="adm-2"><label class="field"><span>보상 문구</span><input class="input" id="ev-reward" maxlength="80" value="${esc(x.reward)}"></label>
+        <label class="field"><span>보상 인원</span><input class="input" type="number" id="ev-win" min="1" max="5" value="${x.winners || 2}"></label></div>
+        <div class="adm-q">${[['오늘~1주', 7], ['오늘~2주', 14], ['이번 달 말까지', 0]].map(([l, n]) => `<button type="button" class="pill" data-qd="${n}">${l}</button>`).join('')}</div>
+        <p class="note">${v ? `현재: <b>${mdw(v.start)} ~ ${mdw(v.end)}</b> · 상위 ${v.winners}명 · ${esc(v.reward)}` : '현재 진행 중인 이벤트가 없어요'}</p>
+      </div>`;
+    },
+    bind() {
+      M.querySelectorAll('[data-qd]').forEach((b) => (b.onclick = () => {
+        const t = kstToday(), n = +b.dataset.qd;
+        $('ev-start').value = t;
+        $('ev-end').value = n ? addDays(t, n - 1) : new Date(Date.UTC(+t.slice(0, 4), +t.slice(5, 7), 0)).toISOString().slice(0, 10);
+      }));
+    },
+    read: () => ({ title: $('ev-title').value, start: $('ev-start').value, end: $('ev-end').value, reward: $('ev-reward').value, winners: +$('ev-win').value }),
+    canOff: true,
+  },
+];
+function admin() {
+  if (!adminOn()) {
+    M.innerHTML = `<section class="adm"><div class="rank-head"><div><span class="eyebrow">ADMIN</span><h1>관리자 모드</h1></div></div>
+      <form class="vb-panel adm-login" id="alf" novalidate>
+        <label class="field" for="apw"><span>관리자 비밀번호</span><input class="input" id="apw" type="password" autocomplete="current-password" required></label>
+        <p class="err" id="ale" role="alert"></p>
+        <button class="vb-primary" id="als" type="submit">들어가기</button>
+      </form></section>`;
+    $('apw').focus();
+    $('alf').onsubmit = async (e) => {
+      e.preventDefault(); $('als').disabled = true; $('ale').textContent = '';
+      try {
+        const d = await acall('/api/admin/login', { method: 'POST', body: { pw: $('apw').value } });
+        AD.token = d.token; AD.exp = d.exp; LS.set('vb-admin', d.token); LS.set('vb-admin-exp', String(d.exp));
+        admin();
+      } catch (x) { $('ale').textContent = x.message; $('als').disabled = false; }
+    };
+    return;
+  }
+  if (!AD.settings) {
+    M.innerHTML = '<section class="adm"><div class="vb-panel empty">설정 불러오는 중…</div></section>';
+    acall('/api/admin/settings').then((d) => { AD.settings = d.settings; if (tab === 'admin') admin(); })
+      .catch((x) => { if (tab === 'admin') { M.innerHTML = `<section class="adm"><div class="vb-panel empty"><b>불러오지 못했어요</b>${esc(x.message)}</div></section>`; } });
+    return;
+  }
+  M.innerHTML = `<section class="adm">
+    <div class="rank-head"><div><span class="eyebrow">ADMIN</span><h1>관리자 모드</h1></div><button type="button" class="vb-secondary" id="aout">관리자 로그아웃</button></div>
+    ${ADMIN_SECTIONS.map((sec) => `<form class="vb-panel adm-sec" data-sec="${sec.id}" novalidate>
+      <div class="ph"><h2>${esc(sec.title)}</h2>${AD.settings[sec.key] ? '<span class="vb-chip ok">설정됨</span>' : '<span class="vb-chip">꺼짐</span>'}</div>
+      <p class="note">${esc(sec.desc)}</p>
+      ${sec.form(AD.settings[sec.key])}
+      <p class="err adm-msg${AD.msg[sec.id] && AD.msg[sec.id].ok ? ' ok' : ''}" role="status">${esc((AD.msg[sec.id] || {}).t || '')}</p>
+      <div class="adm-act"><button type="submit" class="vb-primary">저장</button>${sec.canOff && AD.settings[sec.key] ? '<button type="button" class="vb-secondary" data-off="1">끄기</button>' : ''}</div>
+    </form>`).join('')}
+  </section>`;
+  $('aout').onclick = () => { adminLogout(); tab = 'quiz'; render(true); };
+  ADMIN_SECTIONS.forEach((sec) => {
+    const f = M.querySelector(`[data-sec="${sec.id}"]`);
+    if (sec.bind) sec.bind();
+    const save = async (v) => {
+      f.querySelectorAll('button').forEach((b) => (b.disabled = true));
+      try {
+        const d = await acall('/api/admin/settings', { method: 'POST', body: { k: sec.key, v } });
+        AD.settings[sec.key] = d.v; AD.msg[sec.id] = { ok: true, t: v == null ? '껐어요' : '저장했어요 · 학생 화면에 바로 반영돼요' };
+        attEvent = null;
+      } catch (x) { AD.msg[sec.id] = { ok: false, t: x.message }; }
+      if (tab === 'admin') admin();
+    };
+    f.onsubmit = (e) => { e.preventDefault(); save(sec.read()); };
+    const off = f.querySelector('[data-off]'); if (off) off.onclick = () => save(null);
+  });
+}
+const openAdmin = () => { if (G) return; tab = 'admin'; editing = false; R = null; render(true); };
+$('adm-open').onclick = openAdmin;
+if (location.hash === '#admin') tab = 'admin';
 
 /* ---------- 실시간 갱신 ---------- */
 async function pull(force) {

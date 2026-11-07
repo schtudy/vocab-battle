@@ -5,24 +5,25 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>영단어 3초 배틀 · VOCAB BATTLE</title>
 <meta name="description" content="수능 필수 영단어 3,000개를 15 Unit으로. 문제당 3초 4지선다로 겨루는 실시간 랭킹 퀴즈.">
-<meta name="theme-color" content="#090d1b">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#101f55">
+<meta name="color-scheme" content="light dark">
 <meta property="og:title" content="영단어 3초 배틀">
 <meta property="og:description" content="수능 필수 영단어 15 Unit · 4지선다 · 문제당 3초">
-<link rel="icon" href="/images/logo-mark.svg" type="image/svg+xml">
+<link rel="icon" href="/images/school-emblem-128.png" type="image/png">
 <link rel="preload" href="/fonts/lato-bold.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/nanumsquare-bold.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/fonts.css?v=7">
-<link rel="stylesheet" href="/css/theme.css?v=7">
-<link rel="stylesheet" href="/css/app.css?v=7">
+<link rel="stylesheet" href="/css/fonts.css?v=8">
+<link rel="stylesheet" href="/css/theme.css?v=8">
+<link rel="stylesheet" href="/css/app.css?v=8">
+<script src="/js/theme.js?v=8"></script>
 </head>
 <body>
 <div class="vb-shell">
   <header class="top">
     <div class="top-in">
       <a class="vb-brand" href="/" aria-label="영단어 3초 배틀 처음으로">
-        <img src="/images/logo-mark.svg" alt="" width="40" height="40">
-        <span class="brand-t"><b class="vb-gradient-text">VOCAB BATTLE</b><small>영단어 3초 배틀</small></span>
+        <img src="/images/school-emblem-128.png" alt="경북일고등학교 엠블럼" width="40" height="40">
+        <span class="brand-t"><b class="vb-gradient-text">VOCAB BATTLE</b><small>경북일고 · 영단어 3초 배틀</small></span>
       </a>
       <nav class="tabs" id="tab" aria-label="메뉴">
         <button type="button" data-v="quiz" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span>퀴즈</span></button>
@@ -31,16 +32,18 @@
         <button type="button" data-v="att"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v14H4zM4 10h16M8 3v5M16 3v5M9 15l2 2 4-4"/></svg><span>출석</span></button>
         <button type="button" data-v="talk"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>댓글</span></button>
       </nav>
+      <div class="theme-slot" id="theme-slot"></div>
       <div class="me" id="me"></div>
     </div>
   </header>
   <main class="wrap" id="main"></main>
+  <footer class="foot"><span>© 경북일고 VOCAB BATTLE</span><button type="button" class="lnk" id="adm-open">관리자 모드</button></footer>
   <div class="sr" id="live" aria-live="assertive"></div>
   <noscript><p class="wrap">이 퀴즈는 자바스크립트가 필요해요. 브라우저 설정에서 켜주세요.</p></noscript>
 </div>
-<script src="/js/words.js?v=7" defer></script>
-<script src="/js/passages.js?v=7" defer></script>
-<script src="/js/vocab-battle-ui.js?v=7" defer></script>
-<script src="/js/app.js?v=7" defer></script>
+<script src="/js/words.js?v=8" defer></script>
+<script src="/js/passages.js?v=8" defer></script>
+<script src="/js/vocab-battle-ui.js?v=8" defer></script>
+<script src="/js/app.js?v=8" defer></script>
 </body>
 </html>

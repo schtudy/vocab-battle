@@ -71,6 +71,100 @@ async function attendInfo(env, uid) {
   return { today, checked: !!last && last.day === today, streak, total: total ? total.n : 0 };
 }
 
+// ---------- 관리자 모드 · 설정 ----------
+// 비밀번호 바꾸기: Cloudflare 대시보드 > Worker > 설정 > 변수 및 비밀에 ADMIN_PW를 넣으면 그 값이 우선 적용돼요.
+// (없으면 아래 해시와 같은 비밀번호 '조현준똥'을 사용)
+const ADMIN_PW_SHA256 = "22f51670cb04dbc5d8a6e31a014f91b6c3bffc391f1a20e020831b30207b2cda";
+const ADMIN_HOURS = 12; // 관리자 로그인 유지 시간
+
+const sha256 = async (s) => hex(await crypto.subtle.digest("SHA-256", enc.encode(s)));
+const pwHash = async (env) => (env.ADMIN_PW ? sha256(env.ADMIN_PW) : ADMIN_PW_SHA256);
+async function hmac(keyStr, msg) {
+  const key = await crypto.subtle.importKey("raw", enc.encode(keyStr), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(msg)));
+}
+// 토큰 = 만료시각.서명 (DB 없이 검증, 비밀번호가 바뀌면 자동 무효)
+async function adminToken(env) {
+  const exp = Date.now() + ADMIN_HOURS * 3600e3;
+  return { token: exp + "." + (await hmac(await pwHash(env), "admin:" + exp)), exp };
+}
+async function isAdmin(req, env) {
+  const t = req.headers.get("x-admin-token") || "";
+  const [exp, sig] = t.split(".");
+  if (!exp || !sig || +exp < Date.now()) return false;
+  return sig === (await hmac(await pwHash(env), "admin:" + exp));
+}
+
+const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + "T00:00:00Z"));
+const clip = (v, n) => String(v == null ? "" : v).trim().replace(/\s+/g, " ").slice(0, n);
+// 관리자가 바꿀 수 있는 설정 목록 — 새 기능은 여기에 { pub: 공개여부, check(v) → 정리된 값 또는 오류 문자열 } 추가
+const SETTINGS = {
+  event: {
+    pub: true,
+    check(v) {
+      if (v == null) return null; // 이벤트 끄기
+      const start = clip(v.start, 10), end = clip(v.end, 10);
+      if (!isDay(start) || !isDay(end)) return "날짜 형식이 잘못됐어요 (YYYY-MM-DD)";
+      if (start > end) return "시작일이 마감일보다 늦어요";
+      return {
+        title: clip(v.title, 40) || "출석 이벤트",
+        start, end,
+        reward: clip(v.reward, 80) || "특별한 보상",
+        winners: Math.max(1, Math.min(5, parseInt(v.winners, 10) || 2)),
+      };
+    },
+  },
+};
+let settingsReady = false;
+async function ensureSettings(env) {
+  if (settingsReady) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT NOT NULL, at INTEGER NOT NULL)").run();
+  settingsReady = true;
+}
+async function getSetting(env, k) {
+  await ensureSettings(env);
+  const r = await env.DB.prepare("SELECT v FROM settings WHERE k = ?").bind(k).first();
+  try { return r ? JSON.parse(r.v) : null; } catch { return null; }
+}
+async function setSetting(env, k, v) {
+  await ensureSettings(env);
+  if (v == null) await env.DB.prepare("DELETE FROM settings WHERE k = ?").bind(k).run();
+  else await env.DB.prepare("INSERT INTO settings(k, v, at) VALUES (?, ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, at = excluded.at")
+    .bind(k, JSON.stringify(v), Date.now()).run();
+}
+
+// ---------- 출석 이벤트: 기간 내 출석한 학생 중 합산 점수 상위 N명 ----------
+const endOfDay = (d) => Date.parse(d + "T23:59:59.999+09:00");
+async function eventBoard(env, ev, uid) {
+  const until = Math.min(Date.now(), endOfDay(ev.end));
+  const rows = (await env.DB.prepare(
+    `SELECT a.uid, u.nick, COUNT(*) AS days, MIN(a.at) AS first,
+       (SELECT COALESCE(SUM(b.score), 0) FROM best b WHERE b.uid = a.uid AND b.at <= ?) AS score
+     FROM attendance a JOIN users u ON u.id = a.uid
+     WHERE a.day >= ? AND a.day <= ? GROUP BY a.uid
+     ORDER BY score DESC, days DESC, first ASC`
+  ).bind(until, ev.start, ev.end).all()).results;
+  const top = rows.slice(0, 10).map((r) => ({ nick: r.nick, score: r.score, days: r.days }));
+  const i = uid ? rows.findIndex((r) => r.uid === uid) : -1;
+  return { top, joined: rows.length, me: i < 0 ? null : { rank: i + 1, score: rows[i].score, days: rows[i].days } };
+}
+async function eventInfo(env, uid) {
+  const ev = await getSetting(env, "event");
+  if (!ev) return { event: null };
+  const today = dayOf();
+  const state = today < ev.start ? "upcoming" : today > ev.end ? "ended" : "live";
+  const sig = ev.start + "|" + ev.end;
+  let board;
+  if (state === "ended") {
+    // 마감 후 처음 조회할 때 결과를 고정 저장 (이후 점수가 바뀌어도 수상자는 그대로)
+    let fixed = await getSetting(env, "event_result");
+    if (!fixed || fixed.sig !== sig) { const b = await eventBoard(env, ev, 0); fixed = { sig, top: b.top, joined: b.joined, at: Date.now() }; await setSetting(env, "event_result", fixed); }
+    const mine = uid ? await eventBoard(env, ev, uid) : null;
+    board = { top: fixed.top, joined: fixed.joined, me: mine && mine.me };
+  } else board = state === "live" ? await eventBoard(env, ev, uid) : { top: [], joined: 0, me: null };
+  return { event: ev, state, today, ...board };
+}
+
 async function me(env, u) {
   const best = await env.DB.prepare("SELECT unit, score FROM best WHERE uid = ?").bind(u.id).all();
   const wrong = await env.DB.prepare("SELECT word, cnt FROM wrong WHERE uid = ? ORDER BY cnt DESC").bind(u.id).all();
@@ -140,6 +234,39 @@ async function api(req, env, path) {
       "SELECT u.nick, COUNT(*) AS n FROM attendance a JOIN users u ON u.id = a.uid WHERE a.day LIKE ? GROUP BY a.uid ORDER BY n DESC, MIN(a.at) ASC LIMIT 20"
     ).bind(month + "%").all();
     return json({ month, streak: streak.results, monthly: monthly.results });
+  }
+
+  if (path === "/api/event" && m === "GET") {
+    const who = await auth(req, env);
+    return json(await eventInfo(env, who ? who.id : 0));
+  }
+
+  if (path === "/api/admin/login" && m === "POST") {
+    const pw = String((await body(req)).pw || "");
+    if ((await sha256(pw)) !== (await pwHash(env))) {
+      await new Promise((r) => setTimeout(r, 600)); // 무작위 대입 늦추기
+      return err("관리자 비밀번호가 맞지 않아요", 401);
+    }
+    return json(await adminToken(env));
+  }
+
+  if (path.startsWith("/api/admin/")) {
+    if (!(await isAdmin(req, env))) return err("관리자 로그인이 필요해요", 403);
+    if (path === "/api/admin/settings" && m === "GET") {
+      const out = {};
+      for (const k of Object.keys(SETTINGS)) out[k] = await getSetting(env, k);
+      return json({ settings: out });
+    }
+    if (path === "/api/admin/settings" && m === "POST") {
+      const { k, v } = await body(req);
+      const def = SETTINGS[k];
+      if (!def) return err("없는 설정이에요");
+      const val = def.check(v);
+      if (typeof val === "string") return err(val);
+      await setSetting(env, k, val);
+      return json({ k, v: val });
+    }
+    return err("없는 주소예요", 404);
   }
 
   // 이하 로그인 필요

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 360" role="img" aria-labelledby="title desc">
+<title id="title">경북일고등학교 상징 방패</title>
+<desc id="desc">남색과 노란색 방패 안에 펼쳐진 책과 숫자 1을 표현한 장식용 엠블럼</desc>
+<path d="M160 9 293 48 307 181 Q306 281 160 348 14 281 13 181 L27 48Z" fill="#101f55" stroke="#f5c928" stroke-width="10"/>
+<path d="M160 28 278 62 289 181 Q286 265 160 324 34 265 31 181 L42 62Z" fill="none" stroke="#f5c928" stroke-width="3"/>
+<path d="M48 208 Q100 177 160 213 Q220 177 272 208 L258 249 Q207 225 160 258 Q113 225 62 249Z" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round"/>
+<path d="M160 214V254" stroke="#fff" stroke-width="5"/>
+<path d="M130 74 Q148 72 160 53 H181 V187 H205 V202 H118 V187 H144 V94 Q137 101 119 104 V86Z" fill="none" stroke="#fff" stroke-width="8" stroke-linejoin="round"/>
+<path d="M80 280 Q111 294 135 279 M240 280 Q209 294 185 279" fill="none" stroke="#f5c928" stroke-width="5" stroke-linecap="round"/>
+<path d="M160 281v28m0-12q-13-15-27-8m27 8q13-15 27-8" fill="none" stroke="#f5c928" stroke-width="4" stroke-linecap="round"/>
+</svg>

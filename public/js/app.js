@@ -700,7 +700,7 @@ const PBY = Object.fromEntries(PQ.map((q) => [q.id, q]));
 const PTYPE = { blank: '빈칸 추론', topic: '주제', title: '제목' };
 const PASK = { blank: '다음 빈칸에 들어갈 말로 가장 적절한 것은?', topic: '다음 글의 주제로 가장 적절한 것은?', title: '다음 글의 제목으로 가장 적절한 것은?' };
 const PP = (() => { try { return JSON.parse(LS.get('vb-passage-pref') || '{}'); } catch (e) { return {}; } })();
-const P = { type: PP.type || 'all', mine: PP.mine !== false, wrongOnly: false, id: PP.id || null, pick: null, perm: {}, listOpen: false, pop: null };
+const P = { type: PP.type || 'all', mine: PP.mine !== false, wrongOnly: false, id: PP.id || null, pick: null, perm: {}, listOpen: false, pop: null, shown: {} };
 const PL = { log: {}, remote: false, loaded: false };
 const savePP = () => LS.set('vb-passage-pref', JSON.stringify({ type: P.type, mine: P.mine, id: P.id }));
 const NUM = ['①', '②', '③', '④', '⑤'];
@@ -762,14 +762,21 @@ function renderText(q, reveal) {
   html = html.replace('____', reveal ? `<button type="button" class="blank filled" data-pw="${esc(q.ans)}">${esc(q.opts[0])}${an ? `<sup>${an}</sup>` : ''}</button>` : '<span class="blank" aria-label="빈칸"></span>');
   return html;
 }
-// 각주: 번호 · 단어 · Unit · 뜻 · 별표 ON/OFF (내 별표 상태 그대로 반영, 누르면 바뀜)
+// 각주: 단어를 눌러야 그 단어의 각주가 나타나요(번호·단어·Unit·뜻·별표 ON/OFF). 정답 확인 후에는 전부 공개
+const shownOf = (id) => (P.shown[id] = P.shown[id] || new Set());
 function footnotes(q, reveal) {
   const fn = pWords(q, reveal);
   if (!fn.length) return '';
-  return `<ol class="pq-fn" aria-label="각주 · 단어장 단어">${fn.map((w, i) => {
+  const sh = shownOf(q.id), all = reveal || sh.has('*');
+  const vis = fn.map((w, i) => [w, i]).filter(([w]) => all || sh.has(w));
+  const items = vis.map(([w, i]) => {
     const x = BYW[w], on = ST.star.has(w);
-    return `<li><sup>${i + 1}</sup><b lang="en">${esc(x.w)}</b><span class="u">Unit ${pad(x.u)}</span><span class="m">${esc(x.m)}</span><button type="button" class="fn-st${on ? ' on' : ''}" data-ps="${esc(w)}" aria-pressed="${on}" aria-label="${esc(w)} 별표 ${on ? '끄기' : '켜기'}"><i aria-hidden="true">★</i>${on ? 'ON' : 'OFF'}</button></li>`;
-  }).join('')}</ol>`;
+    return `<li data-fw="${esc(w)}"><sup>${i + 1}</sup><b lang="en">${esc(x.w)}</b><span class="u">Unit ${pad(x.u)}</span><span class="m">${esc(x.m)}</span>${canSpeak ? `<button type="button" class="ic fn-sp" data-sp="${esc(x.w)}" aria-label="${esc(x.w)} 발음 듣기">${spkSVG}</button>` : ''}<button type="button" class="fn-st${on ? ' on' : ''}" data-ps="${esc(w)}" aria-pressed="${on}" aria-label="${esc(w)} 별표 ${on ? '끄기' : '켜기'}"><i aria-hidden="true">★</i>${on ? 'ON' : 'OFF'}</button></li>`;
+  }).join('');
+  return `<div class="pq-fnw" id="pfn">
+    <div class="fn-h"><small>각주 ${vis.length} / ${fn.length}${all ? '' : ' · 밑줄 친 단어를 누르면 나타나요'}</small>${all ? '' : '<button type="button" class="lnk" id="fnall">모두 보기</button>'}</div>
+    ${items ? `<ol class="pq-fn" aria-label="각주 · 단어장 단어">${items}</ol>` : ''}
+  </div>`;
 }
 function pRecord(q, ok) {
   const prev = PL.log[q.id];
@@ -807,8 +814,7 @@ function passage() {
       <h2 class="pq-q" id="pqh"><b>${pad(idx + 1)}.</b> ${PASK[q.type]}</h2>
       <div class="pq-text" lang="en">${renderText(q, done)}</div>
       ${footnotes(q, done)}
-      <p class="note pq-tip">번호가 붙은 단어는 단어장 3,000단어예요 · 각주의 ★ ON/OFF로 별표를 바꿀 수 있어요${mine.size ? ' · <span class="my-dot"></span> 내 별표·오답 단어' : ''}</p>
-      <div class="pq-pop" id="pqp" hidden></div>
+      <p class="note pq-tip">번호가 붙은 단어는 단어장 3,000단어예요 · 누르면 각주(뜻·Unit·★ ON/OFF)가 나타나요${mine.size ? ' · <span class="my-dot"></span> 내 별표·오답 단어' : ''}</p>
       <ol class="pq-opts${done ? ' locked' : ''}" id="po">${pm.map((oi, k) => {
         const cls = done ? (k === ci ? ' is-correct' : k === P.pick ? ' is-wrong' : '') : '';
         return `<li><button type="button" class="vb-option${cls}" data-o="${k}" ${done ? 'disabled' : ''}><span class="k">${NUM[k]}</span><span class="t" lang="en">${esc(q.opts[oi])}</span>${done && k === ci ? '<span class="mk">정답</span>' : done && k === P.pick ? '<span class="mk">내 답</span>' : ''}</button></li>`;
@@ -843,7 +849,7 @@ function passage() {
   $('pmine').onclick = () => { P.mine = !P.mine; savePP(); passage(); };
   $('pwrong').onclick = () => { P.wrongOnly = !P.wrongOnly; P.id = null; P.pick = null; passage(); };
   if (!q) return;
-  const go2 = (id) => { P.id = id; P.pick = null; delete P.perm[id]; savePP(); passage(); const el = $('pq'); if (el) { el.scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); UI.restart(el, 'in-r'); } };
+  const go2 = (id) => { P.id = id; P.pick = null; delete P.perm[id]; delete P.shown[id]; savePP(); passage(); const el = $('pq'); if (el) { el.scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); UI.restart(el, 'in-r'); } };
   M.querySelectorAll('#po [data-o]').forEach((b) => (b.onclick = () => {
     if (P.pick != null) return;
     P.pick = +b.dataset.o; const ok = perm(q.id)[P.pick] === 0;
@@ -858,17 +864,27 @@ function passage() {
   $('plt').onclick = () => { P.listOpen = !P.listOpen; passage(); if (P.listOpen) $('plt').scrollIntoView({ block: 'start' }); };
   M.querySelectorAll('[data-pi]').forEach((b) => (b.onclick = () => { P.listOpen = false; go2(b.dataset.pi); }));
   M.querySelectorAll('[data-ps]').forEach((b) => (b.onclick = () => mark(b.dataset.ps, 'star')));
-  // 단어 뜻 팝업
-  const pop = $('pqp');
+  // 단어 누르면 각주 공개 (다시 누르면 숨김)
+  const bindFn = () => {
+    const fa = $('fnall'); if (fa) fa.onclick = () => { shownOf(q.id).add('*'); refreshFn(); };
+    M.querySelectorAll('#pfn [data-ps]').forEach((b) => (b.onclick = () => mark(b.dataset.ps, 'star')));
+    M.querySelectorAll('#pfn [data-sp]').forEach((b) => (b.onclick = () => speak(b.dataset.sp)));
+  };
+  const refreshFn = (focus) => {
+    const box = $('pfn'); if (!box) return;
+    box.outerHTML = footnotes(q, P.pick != null); bindFn();
+    M.querySelectorAll('.pq-text [data-pw]').forEach((b) => b.classList.toggle('open', shownOf(q.id).has(b.dataset.pw) || shownOf(q.id).has('*') || P.pick != null));
+    const li = focus && M.querySelector(`#pfn [data-fw="${CSS.escape(focus)}"]`);
+    if (li) { UI.restart(li, 'fn-flash'); li.scrollIntoView({ block: 'nearest', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); }
+  };
+  bindFn();
   M.querySelectorAll('.pq-text [data-pw]').forEach((b) => (b.onclick = () => {
-    const w = b.dataset.pw, x = BYW[w]; if (!x) return;
-    if (!pop.hidden && pop.dataset.w === w) { pop.hidden = true; return; }
-    pop.dataset.w = w;
-    pop.innerHTML = `<b lang="en">${esc(x.w)}</b><span>${esc(x.m)}</span><small>Unit ${pad(x.u)}</small>${canSpeak ? `<button type="button" class="ic" id="pps" aria-label="발음 듣기">${spkSVG}</button>` : ''}<button type="button" class="ic st${ST.star.has(w) ? ' on' : ''}" id="ppst" aria-label="별표" aria-pressed="${ST.star.has(w)}">★</button>`;
-    pop.hidden = false;
-    const s1 = $('pps'); if (s1) s1.onclick = () => speak(x.w);
-    $('ppst').onclick = () => mark(w, 'star');
+    const w = b.dataset.pw; if (!BYW[w]) return;
+    const sh = shownOf(q.id);
+    if (sh.has(w) && !sh.has('*') && P.pick == null) { sh.delete(w); refreshFn(); return; }
+    sh.add(w); refreshFn(w);
   }));
+  refreshFn();
 }
 document.addEventListener('keydown', (e) => {
   if (tab !== 'study' || S.view !== 'passage' || G || e.altKey || e.ctrlKey || e.metaKey) return;

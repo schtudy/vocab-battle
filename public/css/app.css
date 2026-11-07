@@ -696,3 +696,12 @@ input[type="date"].input { min-height: 46px; }
 .you { color: var(--vb-sel-fg); background: var(--vb-sel-bg); }
 html:not([data-theme="dark"]) .stat { background: var(--vb-surface); box-shadow: 0 2px 10px rgba(16,31,85,.05); }
 .seal img { border-radius: 50%; background: #fff; }
+/* 각주: 단어를 눌러야 공개 */
+.pq-fnw { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px dashed var(--vb-line-2); }
+.pq-fnw .pq-fn { border-top: 0; padding-top: 0; }
+.fn-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--vb-dim); }
+.fn-h small { font-weight: 700; color: var(--vb-dim); }
+.pw.open { background: rgba(var(--vb-gold-rgb),.14); border-radius: 4px 4px 0 0; }
+.fn-sp { width: 30px; height: 30px; flex-shrink: 0; }
+.fn-flash { animation: fnflash .9s ease-out; }
+@keyframes fnflash { 0% { box-shadow: inset 0 0 0 2px var(--vb-yellow); background: rgba(var(--vb-gold-rgb),.25); } 100% { box-shadow: none; } }

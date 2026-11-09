@@ -88,6 +88,7 @@ function render(anim) {
   else if (tab === 'rank') rank();
   else if (tab === 'att') att();
   else if (tab === 'study') (S.view === 'passage' ? passage() : study());
+  else if (tab === 'kichul') kichul();
   else if (tab === 'admin') admin();
   else talk();
   if (anim) { UI.enter(M); window.scrollTo(0, 0); }
@@ -893,6 +894,131 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowRight') { const b = $('pnext'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
   else if (e.key === 'ArrowLeft') { const b = $('pprev'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
   else if (e.key === 'r' || e.key === 'R') { const b = $('pretry'); if (b && !b.disabled) b.click(); }
+});
+
+/* ---------- 기출 (평가원 6월·9월 모평, 수능) ---------- */
+const KX = window.VB_KICHUL || [];
+const KTYPE = (n) => (n === 21 ? '함축 의미' : n === 22 ? '요지' : n === 23 ? '주제' : n === 24 ? '제목' : n === 29 ? '어법' : n === 30 ? '어휘'
+  : n <= 34 ? '빈칸 추론' : n === 35 ? '무관한 문장' : n <= 37 ? '글의 순서' : n <= 39 ? '문장 삽입' : n === 40 ? '요약문' : n === 41 ? '장문 · 제목' : '장문 · 어휘');
+const KMON = [[6, '6월 모평'], [9, '9월 모평'], [11, '수능 (11월)']];
+const KP = (() => { try { return JSON.parse(LS.get('vb-kc-pref') || '{}'); } catch (e) { return {}; } })();
+const K = { m: KP.m || 11, ex: KP.ex || null, n: KP.n || 21, pick: null, wrongOnly: false, listOpen: false, srcOpen: false };
+const saveKP = () => LS.set('vb-kc-pref', JSON.stringify({ m: K.m, ex: K.ex, n: K.n }));
+const kid = (ex, n) => `k${ex.id}-${n}`;
+const kExams = (m) => KX.filter((e) => e.m === m).sort((a, b) => b.y - a.y);
+const KRANGE = (n) => (n <= 34 ? '[31～34]' : n <= 37 ? '[36～37]' : '[38～39]');
+const kBlank = (s) => s.replace(/_____/g, '<span class="kblank" aria-label="빈칸"></span>');
+function kList(ex) {
+  let qs = ex.qs;
+  if (K.wrongOnly) qs = qs.filter((q) => { const l = PL.log[kid(ex, q.n)]; return l && !l.c; });
+  return qs;
+}
+function kRecord(ex, q, ok) {
+  const id = kid(ex, q.n), prev = PL.log[id];
+  PL.log[id] = { c: ok, n: (prev ? prev.n : 0) + 1 };
+  if (PL.remote) call('/api/plog', { method: 'POST', body: { qid: id, correct: ok } }).catch(() => { const e = $('ke'); if (e) e.textContent = '기록을 저장하지 못했어요. 인터넷 연결을 확인하세요'; });
+  else LS.set('vb-plog', JSON.stringify(PL.log));
+}
+function kOpts(q, done) {
+  const ans = q.a - 1;
+  const cls = (k) => (done ? (k === ans ? ' is-correct' : k === K.pick ? ' is-wrong' : '') : '');
+  const mk = (k) => (done && k === ans ? '<span class="mk">정답</span>' : done && k === K.pick ? '<span class="mk">내 답</span>' : '');
+  if (!q.o) { // 29·30·35·38·39: 번호만
+    return `<div class="k-nums${done ? ' locked' : ''}" id="ko" role="group" aria-label="답 고르기">${NUM.map((c, k) => `<button type="button" class="vb-option k-num${cls(k)}" data-o="${k}" ${done ? 'disabled' : ''} aria-label="${k + 1}번">${c}${mk(k)}</button>`).join('')}</div>`;
+  }
+  const sum = Array.isArray(q.o[0]);
+  return `${sum ? '<div class="k-ab" aria-hidden="true"><span></span><b>(A)</b><span></span><b>(B)</b></div>' : ''}<ol class="pq-opts k-opts${sum ? ' k-sum' : ''}${done ? ' locked' : ''}" id="ko">${q.o.map((o, k) => `<li><button type="button" class="vb-option${cls(k)}" data-o="${k}" ${done ? 'disabled' : ''}><span class="k">${NUM[k]}</span>${sum ? `<span class="t" lang="en">${o[0]}</span><span class="dots" aria-hidden="true">……</span><span class="t" lang="en">${o[1]}</span>` : `<span class="t"${/[가-힣]/.test(o) ? '' : ' lang="en"'}>${o}</span>`}${mk(k)}</button></li>`).join('')}</ol>`;
+}
+function kQuestion(ex, q, idx, list) {
+  const done = K.pick != null, log = PL.log[kid(ex, q.n)];
+  const set = q.set ? ex.set : null;
+  const paras = (arr) => arr.map((p) => `<p>${kBlank(p)}</p>`).join('');
+  return `<article class="pq vb-panel kq" id="kq" aria-labelledby="kqh">
+    <div class="pq-top"><span class="vb-chip k-ty">${KTYPE(q.n)}</span>${q.p === 3 ? '<span class="vb-chip k-3">3점</span>' : ''}${log ? `<span class="vb-chip ${log.c ? 'ok' : 'no'}">${log.c ? '맞힘' : '틀림'} · ${log.n}회</span>` : ''}<span class="pq-no">${idx + 1} / ${list.length}</span></div>
+    ${set ? `<p class="k-g">[41～42] ${set.inst}</p><div class="pq-text k-text" lang="en">${paras(set.t)}${set.f ? `<p class="k-foot">${set.f}</p>` : ''}</div>` : ''}
+    ${q.g ? `<p class="k-g">${KRANGE(q.n)} ${q.g}</p>` : ''}
+    <h2 class="pq-q k-q" id="kqh"><b>${q.n}.</b> ${q.g && q.q === q.g ? '' : q.q}${q.p === 3 ? ' <span class="k-pt">[3점]</span>' : ''}</h2>
+    ${q.box ? `<div class="k-box" lang="en">${kBlank(q.box)}</div>` : ''}
+    ${q.t ? `<div class="pq-text k-text" lang="en">${paras(q.t)}${q.f && !q.sum ? `<p class="k-foot">${q.f}</p>` : ''}</div>` : ''}
+    ${q.sum ? `${q.f ? `<p class="k-foot k-foot-out">${q.f}</p>` : ''}<div class="k-arrow" aria-hidden="true">⇩</div><div class="k-box k-sumbox" lang="en">${q.sum}</div>` : ''}
+    ${kOpts(q, done)}
+    ${done ? `<div class="pq-exp ${K.pick === q.a - 1 ? 'ok' : 'no'}" role="status">
+      <b class="verdict">${K.pick === q.a - 1 ? '정답입니다!' : `아쉬워요. 정답은 ${NUM[q.a - 1]}번`}</b>
+      <p>${q.e}</p>
+      <small class="k-src">정답 근거: 한국교육과정평가원 ${esc(ex.name)} 영어 영역 공식 정답표 · 아래 '해설 참고 출처'</small>
+    </div>` : ''}
+  </article>`;
+}
+function kichul() {
+  if (!PL.loaded) {
+    M.innerHTML = '<section class="study kichul"><div class="vb-panel empty">풀이 기록 불러오는 중…</div></section>';
+    loadPlog().then(() => { if (tab === 'kichul' && !G) kichul(); });
+    return;
+  }
+  const exams = kExams(K.m);
+  let ex = exams.find((e) => e.id === K.ex); if (!ex) { ex = exams[0]; K.ex = ex.id; K.pick = null; }
+  const list = kList(ex);
+  let q = list.find((x) => x.n === K.n);
+  if (!q) { q = list.find((x) => !PL.log[kid(ex, x.n)]) || list[0] || null; K.n = q ? q.n : K.n; K.pick = null; }
+  const idx = q ? list.indexOf(q) : -1;
+  const logs = ex.qs.map((x) => PL.log[kid(ex, x.n)]).filter(Boolean), right = logs.filter((l) => l.c).length;
+  const wrongN = ex.qs.filter((x) => { const l = PL.log[kid(ex, x.n)]; return l && !l.c; }).length;
+  const exStat = (e) => { const s = e.qs.filter((x) => PL.log[kid(e, x.n)]).length; return s ? ` <small>${s}/${e.qs.length}</small>` : ''; };
+  const body = !q ? `<div class="vb-panel empty"><b>틀린 문제가 없어요</b>모두 맞혔거나 아직 푼 문제가 없어요</div>` : `${kQuestion(ex, q, idx, list)}
+    <div class="fc-nav pq-nav">
+      <button type="button" class="vb-secondary" id="kprev" ${idx > 0 ? '' : 'disabled'}>‹ 이전</button>
+      <button type="button" class="vb-secondary" id="kretry" ${K.pick != null ? '' : 'disabled'}>다시 풀기</button>
+      <button type="button" class="vb-primary" id="knext" ${idx < list.length - 1 ? '' : 'disabled'}>다음 문제 ›</button>
+    </div>
+    <p class="kbd-hint"><kbd>1</kbd>–<kbd>5</kbd> 선택 · <kbd>←</kbd><kbd>→</kbd> 이동 · <kbd>R</kbd> 다시 풀기</p>`;
+  M.innerHTML = `<section class="study passage kichul">
+    <div class="rank-head"><div><span class="eyebrow">평가원 기출 · 21–24 · 29–42번</span><h1>기출</h1></div>
+      <small>${ME ? (PL.remote ? '풀이 기록이 계정에 저장돼요' : '오프라인 · 이 기기에만 저장 중') : '게스트 · 이 기기에만 저장돼요'}</small></div>
+    <div class="seg k-mon" id="kmon" role="tablist" aria-label="시행 월">${KMON.map(([m, l]) => `<button type="button" role="tab" data-m="${m}" class="${K.m === m ? 'on' : ''}" aria-selected="${K.m === m}">${l}</button>`).join('')}</div>
+    <div class="hscroll" id="kex" role="tablist" aria-label="시험">${exams.map((e) => `<button type="button" role="tab" class="pill${e.id === ex.id ? ' on' : ''}" data-ex="${e.id}" aria-selected="${e.id === ex.id}">${e.y}학년도${exStat(e)}</button>`).join('')}</div>
+    <div class="k-exh"><b>${esc(ex.name)}</b><small>영어 영역 · ${ex.date.replace(/-/g, '.')} 시행 · 홀수형</small></div>
+    <div class="s-ctrl"><button type="button" class="tgl${K.wrongOnly ? ' on' : ''}" id="kwrong" aria-pressed="${K.wrongOnly}"><span class="sw" aria-hidden="true"></span>틀린 문제만${wrongN ? ' ' + wrongN : ''}</button></div>
+    <div class="s-prog"><div class="row"><b>푼 문제 ${logs.length} / ${ex.qs.length}</b><span>정답률 <b>${logs.length ? Math.round(right / logs.length * 100) : 0}%</b></span></div>
+      <div class="vb-progress"><span style="width:${(logs.length / ex.qs.length * 100).toFixed(1)}%"></span></div></div>
+    <p class="err" id="ke" role="alert"></p>
+    ${body}
+    <button type="button" class="wl-tog" id="klt" aria-expanded="${K.listOpen}" aria-controls="klp"><span>문항 목록 ${K.listOpen ? '접기' : '펼치기'} · ${list.length}문항</span><i aria-hidden="true">${K.listOpen ? '▴' : '▾'}</i></button>
+    <div class="wl-p" id="klp" ${K.listOpen ? '' : 'hidden'}>${K.listOpen ? `<div class="pgrid">${list.map((x) => { const lg = PL.log[kid(ex, x.n)]; return `<button type="button" class="pg${q && x.n === q.n ? ' cur' : ''}${lg ? (lg.c ? ' ok' : ' no') : ''}" data-kn="${x.n}" aria-label="${x.n}번 ${KTYPE(x.n)}${lg ? (lg.c ? ' 맞힘' : ' 틀림') : ' 안 푼 문제'}"><b>${x.n}</b><small>${KTYPE(x.n)}</small></button>`; }).join('')}</div>` : ''}</div>
+    <button type="button" class="wl-tog" id="kst" aria-expanded="${K.srcOpen}" aria-controls="ksp"><span>해설 참고 출처 · ${ex.src.length + 1}곳</span><i aria-hidden="true">${K.srcOpen ? '▴' : '▾'}</i></button>
+    <div class="wl-p k-srcs" id="ksp" ${K.srcOpen ? '' : 'hidden'}><ul>
+      <li>한국교육과정평가원 · ${esc(ex.name)} 영어 영역 문제지·정답표 (원문 그대로 수록, 정답은 공식 정답표 기준)</li>
+      ${ex.src.map((s) => `<li><a href="${esc(s.u)}" target="_blank" rel="noopener noreferrer">${esc(s.t)}</a></li>`).join('')}
+    </ul></div>
+    <p class="note k-copy">이 문제지에 관한 저작권은 한국교육과정평가원에 있습니다 · 비영리 학습용</p>
+  </section>`;
+  M.querySelectorAll('#kmon [data-m]').forEach((b) => (b.onclick = () => { K.m = +b.dataset.m; K.ex = null; K.n = 21; K.pick = null; saveKP(); kichul(); }));
+  M.querySelectorAll('#kex [data-ex]').forEach((b) => (b.onclick = () => { K.ex = b.dataset.ex; K.n = 21; K.pick = null; saveKP(); kichul(); }));
+  $('kwrong').onclick = () => { K.wrongOnly = !K.wrongOnly; K.pick = null; kichul(); };
+  $('klt').onclick = () => { K.listOpen = !K.listOpen; kichul(); if (K.listOpen) $('klt').scrollIntoView({ block: 'start' }); };
+  $('kst').onclick = () => { K.srcOpen = !K.srcOpen; kichul(); if (K.srcOpen) $('kst').scrollIntoView({ block: 'start' }); };
+  if (!q) return;
+  const go3 = (n) => { K.n = n; K.pick = null; saveKP(); kichul(); const el = $('kq'); if (el) { el.scrollIntoView({ block: 'start', behavior: UI.reduceMotion ? 'auto' : 'smooth' }); UI.restart(el, 'in-r'); } };
+  M.querySelectorAll('#ko [data-o]').forEach((b) => (b.onclick = () => {
+    if (K.pick != null) return;
+    K.pick = +b.dataset.o; const ok = K.pick === q.a - 1;
+    kRecord(ex, q, ok); kichul();
+    const btn = M.querySelector(`#ko [data-o="${K.pick}"]`);
+    if (btn) { if (ok) UI.floatText(btn, '정답!'); else { UI.buzz(60); UI.restart(btn, 'shake'); } }
+    say(ok ? '정답입니다' : `오답. 정답은 ${q.a}번`);
+    $('kq').querySelector('.pq-exp')?.scrollIntoView({ block: 'nearest', behavior: UI.reduceMotion ? 'auto' : 'smooth' });
+  }));
+  const pr = $('kprev'); if (pr) pr.onclick = () => idx > 0 && go3(list[idx - 1].n);
+  const nx = $('knext'); if (nx) nx.onclick = () => idx < list.length - 1 && go3(list[idx + 1].n);
+  const rt = $('kretry'); if (rt) rt.onclick = () => go3(q.n);
+  M.querySelectorAll('[data-kn]').forEach((b) => (b.onclick = () => { K.listOpen = false; go3(+b.dataset.kn); }));
+}
+document.addEventListener('keydown', (e) => {
+  if (tab !== 'kichul' || G || e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  if (/^[1-5]$/.test(e.key)) { const b = M.querySelector(`#ko [data-o="${+e.key - 1}"]`); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'ArrowRight') { const b = $('knext'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'ArrowLeft') { const b = $('kprev'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
+  else if (e.key === 'r' || e.key === 'R') { const b = $('kretry'); if (b && !b.disabled) b.click(); }
 });
 
 /* ---------- 출석부 ---------- */

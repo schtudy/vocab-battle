@@ -326,7 +326,7 @@ async function api(req, env, path) {
   if (path === "/api/plog" && m === "POST") {
     const { qid, correct } = await body(req);
     const q = String(qid || "");
-    if (!/^[a-z]\d{2,3}$/.test(q)) return err("잘못된 문제예요");
+    if (!/^([a-z]\d{2,3}|k[sm]\d{2,4}-\d{2})$/.test(q)) return err("잘못된 문제예요");
     await env.DB.prepare(
       "INSERT INTO plog(uid, qid, correct, tries, at) VALUES (?, ?, ?, 1, ?) ON CONFLICT(uid, qid) DO UPDATE SET correct = excluded.correct, tries = plog.tries + 1, at = excluded.at"
     ).bind(u.id, q, correct ? 1 : 0, Date.now()).run();

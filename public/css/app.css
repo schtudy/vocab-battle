@@ -54,7 +54,7 @@
   .brand-t small { display: none; }
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; margin: 0;
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
     padding: 6px max(10px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
     border: 0; border-top: 1px solid var(--vb-line); border-radius: 0;
     background: rgba(var(--vb-bg-rgb),.9); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
@@ -705,3 +705,47 @@ html:not([data-theme="dark"]) .stat { background: var(--vb-surface); box-shadow:
 .fn-sp { width: 30px; height: 30px; flex-shrink: 0; }
 .fn-flash { animation: fnflash .9s ease-out; }
 @keyframes fnflash { 0% { box-shadow: inset 0 0 0 2px var(--vb-yellow); background: rgba(var(--vb-gold-rgb),.25); } 100% { box-shadow: none; } }
+
+/* ---------- 기출 ---------- */
+.k-mon { display: flex; }
+.k-mon button { flex: 1; min-height: 44px; font-size: .92rem; }
+#kex .pill small { margin-left: 4px; font-size: .74rem; opacity: .8; }
+.k-exh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.k-exh b { font-size: 1.05rem; font-weight: 900; }
+.k-exh small { color: var(--vb-dim); font-weight: 700; font-size: .8rem; }
+.kq .k-ty { color: var(--vb-cyan); border-color: rgba(var(--vb-cyan-rgb),.45); }
+.kq .k-3 { color: var(--vb-gold-t); border-color: var(--vb-gold); }
+.k-g { margin: 0; font-weight: 800; font-size: .95rem; line-height: 1.5; color: var(--vb-text); }
+.k-q { font-weight: 700; }
+.k-q u, .k-g u { text-underline-offset: 3px; }
+.k-pt { color: var(--vb-muted); font-weight: 700; font-size: .9em; }
+.k-text { font-family: "Times New Roman", "Lato", "NanumSquare", serif; font-size: 1.1rem; line-height: 1.8; }
+.k-text p { margin: 0; text-indent: 1em; }
+.k-text p + p { margin-top: .55em; }
+.k-text u, .k-box u, .k-opts u { text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.kblank { display: inline-block; min-width: 7em; height: 1.1em; vertical-align: -.15em; border-bottom: 2px solid var(--vb-text); margin: 0 2px; }
+.k-foot { text-indent: 0 !important; margin-top: .7em !important; text-align: right; font-family: "NanumSquare", sans-serif; font-size: .8rem; line-height: 1.5; color: var(--vb-muted); }
+.k-foot-out { margin: -6px 2px 0 !important; }
+.k-box { padding: 14px 16px; border: 1.5px solid var(--vb-text); border-radius: 4px; font-family: "Times New Roman", "Lato", serif; font-size: 1.08rem; line-height: 1.75; overflow-wrap: anywhere; }
+.k-arrow { text-align: center; font-size: 1.4rem; line-height: 1; color: var(--vb-muted); margin: -4px 0; }
+.k-opts .t { font-family: "Times New Roman", "Lato", "NanumSquare", serif; font-size: 1.04rem; }
+.k-opts .t:not([lang]) { font-family: inherit; font-size: .98rem; }
+.k-sum .vb-option { display: grid; grid-template-columns: 2em minmax(0, 1fr) 2.6em minmax(0, 1fr); align-items: center; gap: 4px; text-align: left; }
+.k-sum .vb-option .mk { grid-column: 2 / -1; justify-self: start; }
+.k-sum .dots { color: var(--vb-dim); letter-spacing: -.1em; }
+.k-ab { display: grid; grid-template-columns: 2em minmax(0, 1fr) 2.6em minmax(0, 1fr); gap: 4px; padding: 0 15px; margin-bottom: -4px; font-family: "Times New Roman", serif; color: var(--vb-muted); }
+.k-nums { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.k-num { min-height: 58px; flex-direction: column; justify-content: center; gap: 2px; font-size: 1.4rem; font-weight: 800; padding: 6px 0; }
+.k-num .mk { font-size: .66rem; }
+.k-nums.locked .vb-option:not(.is-correct):not(.is-wrong) { opacity: .5; }
+.k-src { color: var(--vb-dim); font-size: .76rem; line-height: 1.5; }
+.pq-exp b:not(.verdict) { color: var(--vb-lime); }
+.k-srcs ul { margin: 0; padding: 12px 14px 12px 30px; display: grid; gap: 6px; font-size: .86rem; line-height: 1.5; color: var(--vb-muted); }
+.k-srcs a { color: var(--vb-cyan); overflow-wrap: anywhere; }
+.k-copy { text-align: center; font-size: .74rem; }
+@media (max-width: 719px) {
+  .k-text { font-size: 1.02rem; line-height: 1.75; padding: 14px 14px; }
+  .k-box { font-size: 1rem; padding: 12px 13px; }
+  .k-num { min-height: 52px; font-size: 1.25rem; }
+  .k-mon button { font-size: .86rem; }
+}

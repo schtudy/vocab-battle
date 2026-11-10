@@ -78,6 +78,7 @@ function setTabs() {
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
   document.body.classList.toggle('in-game', !!G);
+  KT.sync();
 }
 
 function render(anim) {
@@ -1001,7 +1002,7 @@ function kichul() {
   M.querySelectorAll('#ko [data-o]').forEach((b) => (b.onclick = () => {
     if (K.pick != null) return;
     K.pick = +b.dataset.o; const ok = K.pick === q.a - 1;
-    kRecord(ex, q, ok); kichul();
+    kRecord(ex, q, ok); KT.answer(ok); kichul();
     const btn = M.querySelector(`#ko [data-o="${K.pick}"]`);
     if (btn) { if (ok) UI.floatText(btn, '정답!'); else { UI.buzz(60); UI.restart(btn, 'shake'); } }
     say(ok ? '정답입니다' : `오답. 정답은 ${q.a}번`);
@@ -1020,6 +1021,100 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') { const b = $('kprev'); if (b && !b.disabled) { e.preventDefault(); b.click(); } }
   else if (e.key === 'r' || e.key === 'R') { const b = $('kretry'); if (b && !b.disabled) b.click(); }
 });
+
+/* ---------- 기출 도구: 스톱워치(기록) · 알람 ---------- */
+const KT = (() => {
+  const ld = (k, d) => { try { return JSON.parse(LS.get(k) || 'null') || d; } catch (e) { return d; } };
+  const sw = ld('vb-kc-sw', { at: 0, acc: 0, last: 0, auto: true });   // at: 시작 시각(실행 중), acc: 누적 ms, last: 직전 기록 시점
+  let laps = ld('vb-kc-laps', []);                                       // {t: 표시명, s: 구간, tot: 누적, r: 'o'|'x'|''}
+  const al = ld('vb-kc-al', { set: 120000, end: 0, left: 0 });           // end: 끝나는 시각(실행 중), left: 일시정지 시 남은 ms
+  let open = LS.get('vb-kc-open') === '1', ring = false, el = null, tick = 0, ctx = null;
+  const save = () => { LS.set('vb-kc-sw', JSON.stringify(sw)); LS.set('vb-kc-laps', JSON.stringify(laps.slice(0, 200))); LS.set('vb-kc-al', JSON.stringify(al)); };
+  const swNow = () => sw.acc + (sw.at ? Date.now() - sw.at : 0);
+  const alLeft = () => (al.end ? Math.max(0, al.end - Date.now()) : al.left || al.set);
+  const f = (ms, d) => { const s = Math.floor(ms / 1000); const t = `${pad(Math.floor(s / 60))}:${pad(s % 60)}`; return d ? `${t}.${Math.floor(ms % 1000 / 100)}` : t; };
+  const here = () => { const ex = KX.find((e) => e.id === K.ex); return ex ? `${ex.y} ${ex.m === 11 ? '수능' : ex.m + '월'} ${K.n}번` : '기출'; };
+  function lap(r = '', label) {
+    const now = swNow(); if (!now) return;
+    laps.unshift({ t: label || here(), s: now - sw.last, tot: now, r }); sw.last = now; save(); draw();
+  }
+  function beep() {
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+      for (let i = 0; i < 6; i++) {
+        const o = ctx.createOscillator(), g = ctx.createGain(), t0 = ctx.currentTime + i * 0.32;
+        o.type = 'square'; o.frequency.value = i % 2 ? 660 : 880;
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+        o.connect(g).connect(ctx.destination); o.start(t0); o.stop(t0 + 0.27);
+      }
+    } catch (e) { /* 소리 미지원 */ }
+    try { navigator.vibrate && navigator.vibrate([300, 150, 300, 150, 300]); } catch (e) { /* 무시 */ }
+  }
+  const unlock = () => { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch (e) { /* 무시 */ } };
+  function fire() {
+    al.end = 0; al.left = 0; ring = true; save();
+    laps.unshift({ t: `⏰ 알람 ${f(al.set)} 종료`, s: 0, tot: swNow(), r: 'a' }); save();
+    beep(); say('알람 시간이 끝났어요'); open = true; draw();
+  }
+  function loop() {
+    if (!el) return;
+    if (al.end && Date.now() >= al.end) fire();
+    const a = el.querySelector('#kt-sw'), b = el.querySelector('#kt-al'), fab = el.querySelector('#kt-fab small');
+    if (a) a.textContent = f(swNow(), true);
+    if (b) b.textContent = f(alLeft() + (al.end ? 999 : 0));
+    if (fab) fab.textContent = al.end ? f(alLeft() + 999) : sw.at ? f(swNow()) : '';
+  }
+  function draw() {
+    if (!el) return;
+    const show = tab === 'kichul' && !G;
+    el.hidden = !show; if (!show) return;
+    el.className = `ktool${open ? ' open' : ''}${ring ? ' ring' : ''}`;
+    const run = !!sw.at, arun = !!al.end;
+    el.innerHTML = `<button type="button" class="kt-fab" id="kt-fab" aria-expanded="${open}" aria-controls="kt-p" aria-label="스톱워치·알람 ${open ? '닫기' : '열기'}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9.5 2.5h5M19 5l1.5 1.5"/></svg><small></small></button>
+    <aside class="kt-p vb-panel" id="kt-p" aria-label="스톱워치와 알람">
+      <div class="kt-h"><b>스톱워치</b><button type="button" class="tgl sm${sw.auto ? ' on' : ''}" id="kt-auto" aria-pressed="${sw.auto}" title="문제를 풀 때마다 걸린 시간을 자동으로 기록"><span class="sw" aria-hidden="true"></span>풀면 자동 기록</button></div>
+      <div class="kt-big${run ? ' run' : ''}" id="kt-sw" aria-live="off">${f(swNow(), true)}</div>
+      <div class="kt-btns">
+        <button type="button" class="${run ? 'vb-secondary' : 'vb-primary'}" id="kt-ss">${run ? '일시정지' : swNow() ? '계속' : '시작'}</button>
+        <button type="button" class="vb-secondary" id="kt-lap" ${swNow() ? '' : 'disabled'}>기록</button>
+        <button type="button" class="vb-secondary" id="kt-rs" ${swNow() && !run ? '' : 'disabled'}>초기화</button>
+      </div>
+      <div class="kt-h kt-h2"><b>알람</b>${ring ? '<span class="kt-ring">⏰ 시간 종료!</span>' : ''}</div>
+      <div class="kt-big kt-al${arun ? ' run' : ''}" id="kt-al">${f(alLeft() + (arun ? 999 : 0))}</div>
+      <div class="kt-pre" role="group" aria-label="알람 시간">${[[90, '1:30'], [120, '2:00'], [300, '5:00'], [600, '10:00'], [1800, '30:00']].map(([s, l]) => `<button type="button" class="pill sm${al.set === s * 1000 ? ' on' : ''}" data-ap="${s}" ${arun ? 'disabled' : ''}>${l}</button>`).join('')}</div>
+      <div class="kt-adj"><button type="button" class="vb-secondary" data-ad="-60" ${arun ? 'disabled' : ''} aria-label="1분 줄이기">−1분</button><button type="button" class="vb-secondary" data-ad="-10" ${arun ? 'disabled' : ''} aria-label="10초 줄이기">−10초</button><button type="button" class="vb-secondary" data-ad="10" ${arun ? 'disabled' : ''} aria-label="10초 늘리기">+10초</button><button type="button" class="vb-secondary" data-ad="60" ${arun ? 'disabled' : ''} aria-label="1분 늘리기">+1분</button></div>
+      <div class="kt-btns">
+        ${ring ? '<button type="button" class="vb-primary" id="kt-stop">알람 끄기</button>' : `<button type="button" class="${arun ? 'vb-secondary' : 'vb-primary'}" id="kt-as">${arun ? '일시정지' : al.left ? '계속' : '알람 시작'}</button>`}
+        <button type="button" class="vb-secondary" id="kt-ar" ${arun || al.left ? '' : 'disabled'}>취소</button>
+      </div>
+      <div class="kt-h kt-h2"><b>기록 ${laps.length}</b>${laps.length ? '<button type="button" class="lnk" id="kt-clr">모두 지우기</button>' : ''}</div>
+      ${laps.length ? `<ol class="kt-laps">${laps.slice(0, 60).map((x, i) => `<li class="${x.r === 'o' ? 'ok' : x.r === 'x' ? 'no' : x.r === 'a' ? 'al' : ''}"><span class="kt-n">${laps.length - i}</span><span class="kt-t">${esc(x.t)}${x.r === 'o' ? ' ○' : x.r === 'x' ? ' ✕' : ''}</span>${x.r === 'a' ? '' : `<b>${f(x.s, true)}</b>`}<small>${f(x.tot)}</small></li>`).join('')}</ol>` : '<p class="note kt-empty">스톱워치를 켜고 문제를 풀면 문항별 시간이 여기에 쌓여요</p>'}
+    </aside>`;
+    const on = (id, fn) => { const b = el.querySelector('#' + id); if (b) b.onclick = fn; };
+    on('kt-fab', () => { open = !open; LS.set('vb-kc-open', open ? '1' : '0'); unlock(); draw(); });
+    on('kt-auto', () => { sw.auto = !sw.auto; save(); draw(); });
+    on('kt-ss', () => { if (sw.at) { sw.acc = swNow(); sw.at = 0; } else sw.at = Date.now(); save(); draw(); });
+    on('kt-lap', () => lap());
+    on('kt-rs', () => { sw.acc = 0; sw.at = 0; sw.last = 0; save(); draw(); });
+    el.querySelectorAll('[data-ap]').forEach((b) => (b.onclick = () => { al.set = +b.dataset.ap * 1000; al.left = 0; save(); draw(); }));
+    el.querySelectorAll('[data-ad]').forEach((b) => (b.onclick = () => { al.set = Math.min(99 * 60000, Math.max(10000, al.set + +b.dataset.ad * 1000)); al.left = 0; save(); draw(); }));
+    on('kt-as', () => { unlock(); if (al.end) { al.left = alLeft(); al.end = 0; } else al.end = Date.now() + (al.left || al.set); save(); draw(); });
+    on('kt-ar', () => { al.end = 0; al.left = 0; save(); draw(); });
+    on('kt-stop', () => { ring = false; draw(); });
+    on('kt-clr', () => { laps = []; sw.last = swNow(); save(); draw(); });
+    loop();
+  }
+  function mount() {
+    if (el) return;
+    el = document.createElement('div'); el.id = 'ktool'; el.hidden = true; document.body.appendChild(el);
+    tick = setInterval(loop, 100);
+  }
+  return {
+    sync() { mount(); draw(); },
+    answer(ok) { if (sw.at && sw.auto) lap(ok ? 'o' : 'x'); },
+  };
+})();
 
 /* ---------- 출석부 ---------- */
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
